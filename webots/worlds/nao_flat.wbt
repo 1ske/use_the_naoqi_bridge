@@ -1,0 +1,55 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/factory/containers/protos/WoodenBox.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/softbank/nao/protos/Nao.proto"
+
+# Flat floor, one NAO driven by naoqisim running in Docker (controller "<extern>").
+# Run in real-time mode. The box is a sonar target: drag it in front of the robot.
+WorldInfo {
+  title "use_the_naoqi_bridge: flat floor"
+  basicTimeStep 20
+  FPS 20
+  contactProperties [
+    ContactProperties {
+      material1 "NAO foot material"
+      coulombFriction [
+        7
+      ]
+      bounce 0.3
+      bounceVelocity 0.003
+    }
+  ]
+}
+Viewpoint {
+  orientation -0.2 0.1 0.97 2.3
+  position 1.6 -1.4 0.9
+  follow "NAO"
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+RectangleArena {
+  floorSize 6 6
+  floorTileSize 0.5 0.5
+  wallHeight 0.2
+}
+WoodenBox {
+  translation 0 1 0.15
+  size 0.3 0.3 0.3
+  mass 2
+}
+DEF NAO Nao {
+  name "NAO"
+  controller "<extern>"
+}
+# Ground truth for tests (webots/tools/truth.py), not seen by NAOqi.
+Robot {
+  name "truth"
+  controller "<extern>"
+  supervisor TRUE
+  synchronization FALSE  # optional: the simulation doesn't wait for it
+}

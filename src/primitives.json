@@ -1,0 +1,180 @@
+{
+  "_comment": "Single source of truth for the robot primitives. The bridge (src/bridge.py) validates arguments against `params` and needs one handler per entry; the MCP server (mcp_server/) turns every entry into a tool. kind: read = no motion, runs any time; move = takes the one-movement-at-a-time slot; override = stop/rest, always runs, interrupts any move.",
+  "primitives": [
+    {
+      "name": "get_state",
+      "kind": "read",
+      "description": "Read the robot state without moving it: posture and posture family, fallen (and whether walking is blocked until stand succeeds), odometry x/y (m) and theta (rad) since NAOqi started, awake (motors stiff), battery %, sonar left/right distances (m, 0.25-2.55), foot bumpers, the movement currently running, and warnings. Sonar 2.55 means no echo, NOT free space: the cones point ~30 deg left/right and miss surfaces that aren't square to them, so trust the images for what is ahead. Like every command, the result includes one image: the top camera (ahead) above the bottom camera (ground at the feet), with yellow lines marking ground distance in metres. Call this before planning and whenever unsure what happened.",
+      "params": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "look",
+      "kind": "read",
+      "description": "Take a picture with the head cameras without moving: one image, the top camera (ahead, 320x240) above the bottom camera (ground just in front of the feet). Yellow lines mark where the ground is 0.25-3 m ahead of the camera: an object whose base touches the floor below a line is closer than that line's distance. Every other command already includes this image, so only call it for a fresh frame. camera picks one camera instead of both.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "camera": {
+            "type": "string",
+            "enum": [
+              "top",
+              "bottom",
+              "both"
+            ],
+            "description": "which camera; default both"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "look_around",
+      "kind": "move",
+      "description": "Turn the head and return one panorama image: top camera views in the upper row, bottom camera views below, left to right = left 92 deg, left 46 deg, ahead, right 46 deg, right 92 deg (about +-150 deg). With yaw (and optionally pitch): just that direction. Prefer scan, which does the same sweep and also measures free space and colours. Needs an awake robot.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "yaw": {
+            "type": "number",
+            "description": "radians, positive = left; clamped to [-2.0, 2.0]. Omit for a full sweep"
+          },
+          "pitch": {
+            "type": "number",
+            "description": "radians, positive = down; clamped to [-0.6, 0.5]; default 0"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "stand",
+      "kind": "move",
+      "description": "Wake the motors and go to the StandInit posture (speed <= 0.5). Required before walk_to, and the only way to clear a fall. Getting up after a fall is unreliable, especially in the simulator: check `result` and `state.fallen`; if it fails, call rest and ask the human to reset the robot.",
+      "params": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "sit",
+      "kind": "move",
+      "description": "Sit down (Sit posture, speed <= 0.5). The robot stays awake; call rest to turn the motors off. In the Webots simulator this tips the robot onto its side (reported as result fell): avoid it there.",
+      "params": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "walk_to",
+      "kind": "move",
+      "description": "Walk relative to the robot's current pose: x metres forward, y metres left (sidestep: walk_to(0, y, 0)), then/while turning theta radians counter-clockwise. Clamped per call to 1.0 m distance and pi rad turn; plan longer routes as several calls and check the returned odometry and images between them. Only works when the robot is standing and awake (call stand first) and has not fallen. The bridge stops the walk by itself when a foot bumper is pressed (result bumped) or, for forward walks, when the sonar sees something closer than 0.4 m (result obstacle; forward walks are then refused until you turn, sidestep or back up). The sonar misses many obstacles, so don't rely on it: check the images before walking forward. Returns result (completed / stopped / rested / fell / obstacle / bumped / timeout / did_not_move), what was commanded, the odometry delta, the resulting state and one camera image (top above bottom) taken after the walk. Odometry is NAOqi's estimate: in the simulator the robot really covers about 86% of the commanded distance and turn while odometry reports 100%. For getting somewhere use go, which walks up to 3 m and stops by itself before obstacles; walk_to is for exact short moves such as sidesteps.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "number",
+            "description": "metres forward (negative = backward); clamped so that hypot(x, y) <= 1.0"
+          },
+          "y": {
+            "type": "number",
+            "description": "metres to the left (negative = right); clamped so that hypot(x, y) <= 1.0"
+          },
+          "theta": {
+            "type": "number",
+            "description": "radians, counter-clockwise positive; clamped to [-pi, pi]"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "theta"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "scan",
+      "kind": "move",
+      "description": "Look all around (head sweep, body doesn't move) and measure. Returns: clearance, a list from left (+150 deg) to right (-150 deg) of {bearing_deg, free_m, blocked}: how far the floor is free in each 10 deg direction relative to the body (blocked false = floor seen that far, maybe more; 4.0 = at least 4 m); openings, runs of directions with >= 1 m free, best first; colors, every clearly coloured thing seen with bearing_deg and distance_m (where it meets the floor); and one panorama image (top camera row above bottom camera row, left to right). Distances come from the cameras and a flat floor, measured from between the feet. Call it when starting, at junctions and when go is blocked, not after every move.",
+      "params": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "go",
+      "kind": "move",
+      "description": "Turn to bearing_deg (degrees, positive = left, relative to the body; use the bearings from scan) and walk straight up to distance_m (default and max 3 m). While walking the robot keeps checking its cameras, sonar and foot bumpers and stops by itself 0.3 m before anything in its 0.4 m wide lane, keeps its heading and centres itself between side walls. Returns result: arrived (walked the distance), blocked (something 0.3 m ahead; free_ahead_m says how far), obstacle (sonar), bumped, blind (floor not recognised: call scan), stopped / rested / fell / timeout; odometry delta and one image. Walk long stretches in one call; don't split them into small steps.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "bearing_deg": {
+            "type": "number",
+            "description": "degrees, positive = left, 0 = straight ahead; turned first"
+          },
+          "distance_m": {
+            "type": "number",
+            "description": "metres to walk after turning; default and max 3.0; 0 = only turn"
+          }
+        },
+        "required": [
+          "bearing_deg"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "approach",
+      "kind": "move",
+      "description": "Walk up to the nearest clearly coloured thing of a colour (e.g. a red wall): looks ahead, sweeps the head if it's not in view, goes toward it and repeats (up to 3 legs of go) until it is about 0.45 m away. result: arrived, not_found (with a survey like scan's, without image: explore, then try again), blocked (something else is in the way: go around it, then approach again), or the go outcome that stopped it. target gives the colour's last bearing_deg and distance_m.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "type": "string",
+            "enum": [
+              "red",
+              "orange",
+              "yellow",
+              "green",
+              "blue",
+              "purple"
+            ],
+            "description": "the colour to walk to"
+          }
+        },
+        "required": [
+          "color"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "stop",
+      "kind": "override",
+      "description": "Stop walking and cancel any posture change right away. Works while another command is running. The robot stays awake where it is; use rest to turn the motors off.",
+      "params": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "rest",
+      "kind": "override",
+      "description": "Stop everything, crouch and turn the motors off (safe resting state). Always allowed, also while another command runs. Use it when done, when unsure, or after a fall that stand cannot recover.",
+      "params": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  ]
+}

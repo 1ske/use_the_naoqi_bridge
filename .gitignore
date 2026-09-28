@@ -1,0 +1,4 @@
+*.pyc
+webots/worlds/.*.wbproj
+.venv/
+__pycache__/

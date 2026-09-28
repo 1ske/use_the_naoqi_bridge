@@ -1,0 +1,314 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/softbank/nao/protos/Nao.proto"
+
+# Complex corridor with 5 corners (ported from WE_NAO_v000).
+#
+# A stepped hallway 1.4 m wide with five 90-degree corners (left, right, left,
+# right, left) leading to a dead end marked by a red wall. Walls are 0.9 m high.
+# Each leg is ~2.8 m, so every corner is blind. Side walls are at least 0.5 m from
+# the sonars, above the bridge's 0.4 m forward stop, and the wall ahead at each
+# corner is still over 0.5 m away at the turn point, so the robot can turn in place.
+# Legs are longer than one walk_to (1.0 m max): split them and check odometry.
+#
+# SUCCESS: reach the red wall at the end of the north corridor without touching
+# any wall and without falling.
+WorldInfo {
+  info [
+    "Complex corridor with 5 corners"
+  ]
+  title "use_the_naoqi_bridge: Complex corridor with 5 corners"
+  coordinateSystem "ENU"
+  basicTimeStep 20
+  FPS 20
+  contactProperties [
+    ContactProperties {
+      material1 "NAO foot material"
+      coulombFriction [
+        7
+      ]
+      bounce 0.3
+      bounceVelocity 0.003
+    }
+  ]
+}
+Viewpoint {
+  orientation -0.243343 0.587481 0.771784 0.985144
+  position -6.222 -5.962 10.31
+  follow "NAO"
+  followType "Tracking Shot"
+  followSmoothness 0.3
+}
+Background {
+  skyColor [
+    0.17 0.2 0.25
+  ]
+}
+DirectionalLight {
+  ambientIntensity 0.65
+  direction 0.4 -0.6 -1
+  intensity 2.4
+  castShadows TRUE
+}
+DirectionalLight {
+  ambientIntensity 0.45
+  direction -0.6 0.5 -0.8
+  intensity 1.2
+}
+DEF FLOOR Solid {
+  translation 3.75 4.0 0
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.68 0.69 0.71
+        roughness 0.9
+        metalness 0
+      }
+      geometry Plane {
+        size 16.0 16.0
+      }
+    }
+  ]
+  name "floor"
+  boundingObject Plane {
+    size 16.0 16.0
+  }
+  locked TRUE
+}
+DEF SOUTH_WALL_1 Solid {
+  translation 1.405 -0.75 0.45
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.62 0.62 0.651
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 4.21 0.1 0.9 }
+    }
+  ]
+  name "south wall 1"
+  boundingObject Box { size 4.21 0.1 0.9 }
+  locked TRUE
+}
+DEF BACK_WALL Solid {
+  translation -0.75 0.0 0.45
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.62 0.62 0.651
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 0.1 1.6 0.9 }
+    }
+  ]
+  name "back wall"
+  boundingObject Box { size 0.1 1.6 0.9 }
+  locked TRUE
+}
+DEF NORTH_WALL_1 Solid {
+  translation 0.51 0.75 0.45
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.62 0.62 0.651
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 2.42 0.1 0.9 }
+    }
+  ]
+  name "north wall 1"
+  boundingObject Box { size 2.42 0.1 0.9 }
+  locked TRUE
+}
+DEF WEST_WALL_2 Solid {
+  translation 1.77 2.035 0.45
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.62 0.62 0.651
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 0.1 2.67 0.9 }
+    }
+  ]
+  name "west wall 2"
+  boundingObject Box { size 0.1 2.67 0.9 }
+  locked TRUE
+}
+DEF EAST_WALL_2 Solid {
+  translation 3.56 0.585 0.45
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.62 0.62 0.651
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 0.1 2.77 0.9 }
+    }
+  ]
+  name "east wall 2"
+  boundingObject Box { size 0.1 2.77 0.9 }
+  locked TRUE
+}
+DEF SOUTH_WALL_3 Solid {
+  translation 4.675 1.92 0.45
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.62 0.62 0.651
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 2.33 0.1 0.9 }
+    }
+  ]
+  name "south wall 3"
+  boundingObject Box { size 2.33 0.1 0.9 }
+  locked TRUE
+}
+DEF NORTH_WALL_3 Solid {
+  translation 2.895 3.42 0.45
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.62 0.62 0.651
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 2.35 0.1 0.9 }
+    }
+  ]
+  name "north wall 3"
+  boundingObject Box { size 2.35 0.1 0.9 }
+  locked TRUE
+}
+DEF WEST_WALL_4 Solid {
+  translation 4.02 4.7 0.45
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.62 0.62 0.651
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 0.1 2.66 0.9 }
+    }
+  ]
+  name "west wall 4"
+  boundingObject Box { size 0.1 2.66 0.9 }
+  locked TRUE
+}
+DEF EAST_WALL_4 Solid {
+  translation 5.89 3.25 0.45
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.62 0.62 0.651
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 0.1 2.76 0.9 }
+    }
+  ]
+  name "east wall 4"
+  boundingObject Box { size 0.1 2.76 0.9 }
+  locked TRUE
+}
+DEF SOUTH_WALL_5 Solid {
+  translation 7.01 4.58 0.45
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.62 0.62 0.651
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 2.34 0.1 0.9 }
+    }
+  ]
+  name "south wall 5"
+  boundingObject Box { size 2.34 0.1 0.9 }
+  locked TRUE
+}
+DEF NORTH_WALL_5 Solid {
+  translation 5.2 6.08 0.45
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.62 0.62 0.651
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 2.46 0.1 0.9 }
+    }
+  ]
+  name "north wall 5"
+  boundingObject Box { size 2.46 0.1 0.9 }
+  locked TRUE
+}
+DEF WEST_WALL_6 Solid {
+  translation 6.38 7.365 0.45
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.62 0.62 0.651
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 0.1 2.67 0.9 }
+    }
+  ]
+  name "west wall 6"
+  boundingObject Box { size 0.1 2.67 0.9 }
+  locked TRUE
+}
+DEF EAST_WALL_6 Solid {
+  translation 8.23 6.615 0.45
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.62 0.62 0.651
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 0.1 4.17 0.9 }
+    }
+  ]
+  name "east wall 6"
+  boundingObject Box { size 0.1 4.17 0.9 }
+  locked TRUE
+}
+DEF RED_WALL Solid {
+  translation 7.305 8.75 0.45
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.85 0.12 0.12
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 1.95 0.1 0.9 }
+    }
+  ]
+  name "red wall"
+  boundingObject Box { size 1.95 0.1 0.9 }
+  locked TRUE
+}
+DEF NAO Nao {
+  translation 0.0 0.0 0.334
+  rotation 0 0 1 0.0
+  name "NAO"
+  controller "<extern>"
+}
+# Ground truth for tests (webots/tools/truth.py), not seen by NAOqi.
+Robot {
+  name "truth"
+  controller "<extern>"
+  supervisor TRUE
+  synchronization FALSE  # optional: the simulation doesn't wait for it
+}

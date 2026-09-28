@@ -1,0 +1,13 @@
+[project]
+name = "naoqi-mcp"
+version = "0.1.0"
+description = "MCP server exposing safe NAO movement primitives through the NAOqi bridge"
+requires-python = ">=3.10"
+dependencies = ["mcp>=1.10", "httpx>=0.27"]
+
+[project.scripts]
+naoqi-mcp = "naoqi_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

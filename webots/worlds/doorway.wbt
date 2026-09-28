@@ -1,0 +1,139 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/softbank/nao/protos/Nao.proto"
+
+# Doorway (ported from WE_NAO_v000).
+#
+# Two rooms separated by a north-south wall, 1 m high, with a 0.8 m gap offset 1.2 m
+# north of the robot's start, so the opening is not straight ahead. The NAO starts
+# in the west room and has to get into the east room through the gap. The sonar
+# sees the wall from anywhere on it and says nothing about where the gap is, and
+# the door frame edges are thin obstacles it sees late or not at all: square up to
+# the gap before walking through. An orange marker post in the east room gives the
+# camera something to aim at through the opening.
+#
+# SUCCESS: end in the east room (x > 0.45) having gone through the gap, without
+# touching the wall and without falling.
+WorldInfo {
+  info [
+    "Doorway"
+  ]
+  title "use_the_naoqi_bridge: Doorway"
+  coordinateSystem "ENU"
+  basicTimeStep 20
+  FPS 20
+  contactProperties [
+    ContactProperties {
+      material1 "NAO foot material"
+      coulombFriction [
+        7
+      ]
+      bounce 0.3
+      bounceVelocity 0.003
+    }
+  ]
+}
+Viewpoint {
+  orientation -0.243342 0.587481 0.771784 0.985143
+  position -5.692 -5.792 6.731
+  follow "NAO"
+  followType "Tracking Shot"
+  followSmoothness 0.3
+}
+Background {
+  skyColor [
+    0.17 0.2 0.25
+  ]
+}
+DirectionalLight {
+  ambientIntensity 0.65
+  direction 0.4 -0.6 -1
+  intensity 2.4
+  castShadows TRUE
+}
+DirectionalLight {
+  ambientIntensity 0.45
+  direction -0.6 0.5 -0.8
+  intensity 1.2
+}
+DEF FLOOR Solid {
+  translation 0.0 0.0 0
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.68 0.69 0.71
+        roughness 0.9
+        metalness 0
+      }
+      geometry Plane {
+        size 9.0 9.0
+      }
+    }
+  ]
+  name "floor"
+  boundingObject Plane {
+    size 9.0 9.0
+  }
+  locked TRUE
+}
+DEF WALL_SOUTH Solid {
+  translation 0.2 -0.85 0.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.62 0.62 0.651
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 0.12 3.3 1.0 }
+    }
+  ]
+  name "wall south"
+  boundingObject Box { size 0.12 3.3 1.0 }
+  locked TRUE
+}
+DEF WALL_NORTH Solid {
+  translation 0.2 2.55 0.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.62 0.62 0.651
+        roughness 0.6
+        metalness 0
+      }
+      geometry Box { size 0.12 1.9 1.0 }
+    }
+  ]
+  name "wall north"
+  boundingObject Box { size 0.12 1.9 1.0 }
+  locked TRUE
+}
+DEF MARKER_POST Solid {
+  translation 1.9 1.2 0.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.9 0.45 0.15
+        roughness 0.6
+        metalness 0
+      }
+      geometry Cylinder { radius 0.06 height 1.0 }
+    }
+  ]
+  name "marker post"
+  boundingObject Cylinder { radius 0.06 height 1.0 }
+  locked TRUE
+}
+DEF NAO Nao {
+  translation -1.8 0.0 0.334
+  rotation 0 0 1 0.0
+  name "NAO"
+  controller "<extern>"
+}
+# Ground truth for tests (webots/tools/truth.py), not seen by NAOqi.
+Robot {
+  name "truth"
+  controller "<extern>"
+  supervisor TRUE
+  synchronization FALSE  # optional: the simulation doesn't wait for it
+}
