@@ -29,32 +29,19 @@ BRIDGE_URL = os.environ.get("NAOQI_BRIDGE_URL", "http://127.0.0.1:8765").rstrip(
 PRIMITIVES = Path(os.environ.get("NAOQI_PRIMITIVES",
                                  Path(__file__).resolve().parents[2] / "src" / "primitives.json"))
 HEARTBEAT_PERIOD = 5.0  # s; the bridge rests the robot after BRIDGE_CLIENT_TIMEOUT (20 s) without requests
-CALL_TIMEOUT = 400.0    # s; the bridge bounds every movement itself (go <= ~110 s, approach 3 go legs)
+CALL_TIMEOUT = 400.0    # s; the bridge bounds every movement itself (go <= ~110 s)
 
 INSTRUCTIONS = """\
-Controls a NAO robot (simulated in Webots or real) through safe movement primitives.
-You decide where to go; the robot bridge sees and steps: it measures free floor with its cameras,
-walks, and stops by itself before obstacles. It may refuse a command, with the reason.
-- Start with get_state and stand. Then work in few, large moves:
-  1. scan: free metres per direction (clearance), openings, coloured things, one panorama image.
-  2. Pick a direction from openings / colors and the image, then go(bearing_deg, distance_m):
-     up to 3 m in one call, stops 0.3 m before anything in its lane. Don't split long stretches.
-  3. scan again only when go returns blocked / blind, or where the route may branch.
-- To reach a coloured target (e.g. "the red wall"), call approach(color). If it's not_found,
-  explore toward the best opening with go and try again; if blocked, go around, then approach.
-- Keep a short list in your reasoning of junctions you've seen and which ways you've taken
-  (with odometry), so you don't explore the same place twice. Only turn back at a dead end.
-- Bearings of scan, go and approach are degrees relative to the body, positive = left.
-  walk_to is for exact short moves (x forward, y left in m, theta rad): sidesteps, small fixes.
-- clearance comes from the cameras on a flat floor: thin things above the floor (table tops) or
-  things the colour of the floor can be missed. The sonar and foot bumpers stop walks as well.
-  Look at the image when the numbers and the task disagree.
-- Every movement returns `result` and the resulting `state`. Believe them over your plan:
-  a walk can be stopped, the robot can fall, odometry can be wrong (the simulator walks ~86%
-  of what odometry reports).
-- After a fall walking is refused until stand succeeds; stand after a fall often fails.
-  Then call rest and tell the human.
-- Use stop to halt a walk and stay standing, rest when finished or unsure.
+Controls a NAO robot (simulated or real).
+- Start with get_state, then stand.
+- Every result includes a camera image (top: ahead, bottom: at the feet; yellow lines = ground
+  distance in m). Use it to choose where to go; look_around shows the sides.
+- go turns and walks; walk_to is for small corrections and sidesteps.
+- Results say what actually happened (result, odometry, state): trust them over your plan.
+  obstacle or bumped means something is in the way.
+- say tells the people nearby what you're doing.
+- rest when you are done, unsure, or after a fall that stand can't fix, and tell the human.
+- battery is informational; mention it only below 10% and not charging.
 """
 
 

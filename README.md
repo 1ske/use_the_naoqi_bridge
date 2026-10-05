@@ -1,7 +1,7 @@
 # use_the_naoqi_bridge
 
 Lets an LLM drive a NAO through NAOqi 2.1.4 over MCP. The LLM plans. The MCP server offers only
-safe movement primitives (walk, turn, stop, postures, state) and the head cameras (as real MCP images),
+safe movement primitives (walk, turn, stand, rest, state) and the head cameras (as real MCP images),
 and a Python 2.7 bridge enforces the safety rules. The simulator (naoqisim) comes from [NAOQI_ATTEMPT_v1](../NAOQI_ATTEMPT_v1). Everything
 here talks to NAOqi on port 9559, so the same code runs on a real NAO V5 by changing `NAO_IP`.
 
@@ -55,7 +55,6 @@ curl localhost:8765/health
 curl -XPOST localhost:8765/call/get_state -d '{}'
 curl -XPOST localhost:8765/call/stand -d '{}'
 curl -XPOST localhost:8765/call/walk_to -d '{"x":0.3,"y":0,"theta":0}'
-curl -XPOST localhost:8765/call/stop -d '{}'
 curl -XPOST localhost:8765/call/rest -d '{}'
 ```
 Replies are `{"ok": true, "result": {...}}`, or `{"ok": false, "error": "...", "state": {...}}` with
@@ -68,34 +67,32 @@ unreachable). The bridge rests the robot if it gets no request for 20 s while th
 
 | tool | kind | what it does |
 |---|---|---|
-| `get_state` | read | posture + family, fallen, odometry x/y/θ, awake, battery %, sonar L/R, foot bumpers, current movement, warnings |
+| `get_state` | read | posture + family, fallen, odometry x/y/θ, awake, sonar L/R, foot bumpers, current movement, warnings |
 | `look(camera)` | read | one JPEG: the `top` view above the `bottom` view (320×240 each), or just one camera, plus head yaw/pitch and state |
 | `look_around(yaw?, pitch?)` | move | turns the head (joint speed ≤ 0.3, yaw ±2.0, pitch −0.6…0.5 rad), then faces forward; one panorama (top row = top camera, bottom row = bottom camera). No yaw: 5-direction sweep (≈ ±150°) |
-| `scan` | move | the `look_around` sweep (head tilted down to the sides) plus measurements: `clearance` (free floor in m per 10° bearing, ±150°), `openings`, `colors` (bearing + distance of every clearly coloured thing), one panorama |
-| `stand` | move | `wakeUp()` + `goToPosture("StandInit", 0.5)`; the only way to clear a fall |
-| `sit` | move | `goToPosture("Sit", 0.5)` (tips over in the simulator, see below) |
-| `walk_to(x, y, theta)` | move | relative `moveTo`, run with `.post`; `y` alone sidesteps; clamped to 1.0 m and π rad per call; stops at obstacles (below); returns odometry before/after/delta |
-| `go(bearing_deg, distance_m?)` | move | turns, then walks up to 3 m with `moveToward`, re-measuring the floor ahead 5×/s: stops 0.3 m before anything in its 0.4 m lane, steers around lane edges (±35°), centres between side walls (`arrived`, `blocked`, `obstacle`, `bumped`, `blind`, …) |
-| `approach(color)` | move | finds the colour (ahead, else with a sweep) and runs `go` toward it, up to 3 legs, until ~0.45 m away (`arrived`, `not_found` with a survey, `blocked`, …) |
-| `stop` | override | `stopMove()` on walking and postures right away; the robot stays awake |
+| `stand` | move | `wakeUp()` + `goToPosture("StandInit", 0.5)`; the only way to clear a fall. `failed` (with the joints NAOqi flags) if wakeUp leaves the motors off; also `failed` if it ends limp or in Crouch |
+| `walk_to(x, y, theta)` | move | relative `ALMotion.moveTo`, run with `.post`; `y` alone sidesteps; clamped to 1.0 m and π rad per call; NAOqi stops it at obstacles (below); returns odometry before/after/delta |
+| `go(bearing_deg, distance_m?)` | move | turns in place, then walks straight up to 3 m, both with `ALMotion.moveTo`; NAOqi stops it at obstacles, the bridge at a newly pressed foot bumper (`arrived`, `obstacle`, `bumped`, …; `stopped_by`) |
+| `say(text)` | action | speaks the text (`ALTextToSpeech.say`, up to 300 characters) without waiting, so it can narrate during a walk; no image |
 | `rest` | override | stop, then `rest()` (limp and crouched), always allowed |
 
 - *read* runs any time.
+- *action* runs any time and doesn't move the robot, but isn't read-only (`say`).
 - *move* takes the single movement slot. A second move is refused with "busy".
 - *override* always runs and interrupts the current move.
 
-Every movement returns `result` (`completed`, `stopped`, `rested`, `fell`, `obstacle`, `bumped`,
-`timeout`, `did_not_move`, `failed`) plus the resulting `state`, so the planner sees what actually happened.
+Every movement returns `result` (`completed`, `rested`, `fell`, `obstacle`, `bumped`,
+`timeout`, `failed`) plus the resulting `state`, so the planner sees what actually happened.
 
 Every successful result also carries one image taken after the command finished (`"images"`): the
-top (ahead) camera view above the bottom (feet) one; `look_around` and `scan` return one panorama
+top (ahead) camera view above the bottom (feet) one; `look_around` returns one panorama
 instead. One image per result matters: some clients (Antigravity) make the model open every image
 with a separate tool call. The MCP server turns it into MCP image content, so the model sees
 the picture and the JSON keeps only the metadata (`images_meta`). Yellow lines on each image mark
 where the ground is 0.25–3 m ahead of the camera, computed from the camera's height and pitch
 (`ALMotion.getPosition("CameraTop", FRAME_ROBOT)`). They're skipped when the robot isn't upright.
 A QVGA frame costs the model about 100 tokens. `BRIDGE_AUTO_IMAGE=0` limits images to
-`look`/`look_around`/`scan`, and `BRIDGE_IMAGE_GRID=0` drops the lines. naoqisim only fills QVGA buffers, so the
+`look`/`look_around`, and `BRIDGE_IMAGE_GRID=0` drops the lines. naoqisim only fills QVGA buffers, so the
 bridge always asks for QVGA, on a real NAO too.
 
 ### Adding a primitive
@@ -111,7 +108,7 @@ bridge always asks for QVGA, on a real NAO too.
    @primitive("look_at")
    def look_at(call):              # call.p: NAOqi proxies, call.args: validated arguments
        yaw = max(-1.0, min(1.0, call.args["yaw"]))   # clamp here: never trust the arguments
-       ...                          # long motions: proxy.post.X(...) + wait_task() so stop works
+       ...                          # long motions: proxy.post.X(...) + wait_task() so rest can interrupt
        return {"result": "completed", "state": read_state(call.p)}
    ```
    `move` handlers already run inside the movement slot. Raise `Refused("reason")` to refuse
@@ -126,36 +123,46 @@ angles (except clamped head yaw/pitch in `look_around`), stiffness, Cartesian co
 
 Enforced in `src/bridge.py` (and `src/common.py` for scripts). The MCP layer only forwards commands.
 
-The bridge does the seeing for `scan`, `go` and `approach` (`src/perception.py`, flat-floor camera
-geometry, no world knowledge): it learns the floor's colour from the ground at the feet and measures,
-per image column, how far that floor runs. Measured against Webots ground truth in
-`corridor_complex.wbt` this is within ~0.1 m, always on the short side. The model decides where to
-go; the bridge walks and stops. Details that keep it safe:
+The robot only moves when the bridge tells it to. On every (re)connect, the bridge turns off
+NAOqi's own behaviours: autonomous life (`disabled`, which rests the robot), basic awareness (face
+and sound tracking), autonomous moves, breathing and idle posture. The monitor checks every 2 s that
+they stay off. If autonomous life or awareness comes back (e.g. the chest button was double-pressed),
+the bridge stops, rests and turns them off again, and the client has to call `stand` again. The
+bridge leaves them off when it exits, so they come back only after a reboot or a chest-button
+double-press. `GET /health` shows their state under `autonomy`.
 
-- The bottom camera only counts while the head faces ahead (turned sideways it sees the robot's
-  arms), and not its outer 10 % (the hands). Obstacles closer than the top camera can see are
-  reported as `upper_bound` ("something closer than this").
-- A new floor colour is only learnt if it matches the known one, hardly appears above the horizon
-  in the top camera (a plain wall right ahead would), or the sonar has nothing within 0.5 m.
-  Unknown floor: `go` returns `blind`.
-- In `go`, a sonar echo under `BRIDGE_OBSTACLE_STOP_M` stops the walk unless the cameras (or
-  obstacle points remembered from the last 0.6 m of walking) show something at about that
-  distance on that side; seen obstacles are left to the camera lane check, which stops closer.
+The model does the seeing (camera images); the bridge does no image processing. Walking uses
+NAOqi's own primitives: `ALMotion.moveTo` holds the heading on odometry, so `go` walks straight, and
+NAOqi decides when a walk has to stop at an obstacle (below). `src/probe.py` prints what a NAOqi exposes (modules, methods,
+protection and walk settings, sonar/navigation memory keys) without moving the robot:
+`NAO_IP=<ip> docker compose run --rm app python probe.py --out probe_real.json` (lands in `src/`).
 
-- NAOqi's fall manager, foot-contact protection and collision protections stay as they are. Nothing
-  sets them, and no primitive exposes them. (In naoqisim, external collision protection reads as
-  off. `/health` and the bridge log show it.)
-- Walks stop on their own when a foot bumper is pressed (`bumped`). Forward walks also stop when a
-  sonar reads closer than 0.4 m (`obstacle`, `BRIDGE_OBSTACLE_STOP_M`), and don't start then. Backing up,
-  sidestepping and turning stay allowed. NAOqi's own external collision stop is off in naoqisim, and the
-  sonar misses a lot (Sim limits), so this is a last line of defence and the model has to use the images.
+- Obstacles: NAOqi's own. The bridge turns on ALMotion's external collision protection for `Move`
+  (`setExternalCollisionProtectionEnabled("Move", True)`, off by default on the NAO) and never turns it
+  off. NAOqi then refuses or stops any walk toward an obstacle in its security area (0.4 m ahead, 0.1 m
+  to the sides: `getOrthogonalSecurityDistance` / `getTangentialSecurityDistance`), from the sonar;
+  backing away stays allowed. A walk that ends short of what was commanded is reported as `obstacle`
+  (`stopped_by.naoqi`); NAOqi only logs where the obstacle was. `ALNavigation.moveTo` is not used:
+  NAOqi 2.1.4 logs it as deprecated ("the robot will not stop if there is an obstacle"), and its
+  `.post` task ends at once while the robot keeps walking.
+- The protection's obstacles come from ALNavigation's safety loop, which only starts when the
+  protection is turned on while the robot is awake (turning it on again when it's already on does
+  nothing). Before every walk the bridge checks `ALNavigation._isSafetyLoopRunning()` and, if needed,
+  turns the protection off and on while the robot stands still; if the loop still doesn't run, or
+  the NAOqi has no ALNavigation, walking is refused. `GET /health` shows it under `obstacle_protection`.
+- The sonar cones point ~30° outward and miss narrow things straight ahead (Sim limits), so the
+  model still has to use the images.
+- Walks stop when a foot bumper gets pressed during the walk (`bumped`); one already pressed at the
+  start (a foot against a wall) doesn't block walking away.
+- NAOqi's fall manager, foot-contact and self-collision protections stay as they are: nothing sets
+  them, and no primitive exposes them.
 - Joint `fractionMaxSpeed` ≤ 0.3, posture speed ≤ 0.5 (`clamp()`). Walks ≤ 1.0 m and ≤ π rad per call.
 - Arguments are checked against `primitives.json`: unknown keys, wrong types, NaN and Infinity are rejected.
 - Walking needs an awake robot in the Standing family (not Crouch), finite odometry, and no
   unresolved fall. Otherwise the bridge refuses with the reason.
 - Falls (`robotHasFallen`, `ALMotion/RobotIsFalling`, lying posture families) stop the movement.
   Walking stays blocked until `stand` succeeds.
-- One movement at a time. `stop` and `rest` always get through.
+- One movement at a time. `rest` always gets through.
 - Client lost (no request or heartbeat for 20 s, or the caller hangs up mid-movement) or bridge
   shutdown (SIGTERM/SIGINT): the bridge stops and rests (`end_limp`, the same as `safe_session`).
   Cancelling a tool call mid-walk therefore rests the robot.
@@ -165,9 +172,9 @@ go; the bridge walks and stops. Details that keep it safe:
 
 ## Sim limits (NAOQI_ATTEMPT_v1/NOTES.md, plus what the bridge tests showed)
 
-- Walks go ~86 % of the commanded distance, but odometry reports the full distance. Seen here too:
-  0.3 m commanded, 0.299 m odometry, 0.25–0.26 m truth. `go` with `moveToward` and step length 0.06
-  (`BRIDGE_MAX_STEP_X`; NAOqi's default is 0.04) covered 70–75 % of odometry, at ~0.07–0.1 m/s.
+- Walks go less far than odometry says: ~86 % in NAOQI_ATTEMPT_v1's tests (default step 0.04), and
+  66–68 % over 3–4.5 m with the bridge's step length 0.06 (`BRIDGE_MAX_STEP_X`) in `corridor.wbt`
+  (3.0 m odometry, 1.97 m truth).
 - NaN odometry: naoqisim used to start NAOqi before sending any sensor values, so ALMotion's odometry
   went NaN during the first motion and `moveTo` did nothing (0/10 fresh starts OK). Patch 0004 in
   NAOQI_ATTEMPT_v1 fixes it (10/10). Rebuild naoqisim there (`docker compose build naoqisim`). If
@@ -175,12 +182,13 @@ go; the bridge walks and stops. Details that keep it safe:
   `tools/sim_reset.sh` in NAOQI_ATTEMPT_v1.
 - Getting up after a fall fails at the 0.5 speed cap (`stand` times out, the robot ends in e.g. SitRelax).
   Rest, then reset the world.
-- `sit` (Sit at 0.5) tips the robot onto its side in Webots (roll −25°, posture family `Left`),
-  2 of 2 tries. The bridge reports it as a fall.
 - NAOqi counts Crouch as posture family Standing. The bridge refuses to walk from Crouch anyway.
 - Restarting naoqisim leaves the robot limp, so it falls. Rest first, and reload the world
   afterwards (Webots, or a `Supervisor().worldReload()` controller for the `truth` robot).
-- Camera is QVGA only. ALNavigation, ALLocalization, ALVisionRecognition and ALSystem are missing.
+- Camera is QVGA only. ALSystem, ALAudioDevice, ALLandMarkDetection, ALVisionRecognition, ALBasicAwareness
+  and ALAutonomousMoves are missing. ALNavigation and ALLocalization load since naoqisim has `libpng12`
+  (NAOQI_ATTEMPT_v1), with the same methods as the real NAO. NAOqi's obstacle stop works on the Webots
+  sonar: in `corridor.wbt` it stopped `go` about 0.45 m before the end wall and the green panel.
 - Sonar only sees surfaces facing it: Webots drops rays hitting at > 22.5°, the two 60° cones point
   ~30° outward, and the range is 0.25–2.55 m. A box straight ahead often reads 2.55 (= no echo).
   Only `US/*/Sensor/Value` is filled (no multi-echo values). Walls are fine:

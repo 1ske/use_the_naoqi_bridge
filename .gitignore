@@ -2,3 +2,4 @@
 webots/worlds/.*.wbproj
 .venv/
 __pycache__/
+.env

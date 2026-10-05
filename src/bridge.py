@@ -2,8 +2,8 @@
 """HTTP/JSON bridge from the MCP server to NAOqi 2.1.4: safe movement primitives only.
 
     POST /call/<primitive>  body: JSON object of arguments
-        200 {"ok": true, "result": {...}}
-        4xx/5xx {"ok": false, "error": "...", "state": {...}}  (state when it could be read)
+        200 {"ok": true, "result": {..., "battery": {"percent", "charging"}}}
+        4xx/5xx {"ok": false, "error": "...", "state": {...}, "battery": {...}}  (when they could be read)
     POST /heartbeat         keeps the client lease alive (the MCP server sends it every few s)
     GET  /health            NAOqi connection, protections, current movement
 
@@ -12,22 +12,26 @@ primitives.json. Each one has exactly one handler below (@primitive). The bridge
 and trusts none of the arguments it receives:
 - arguments are validated against primitives.json, walks are clamped (1.0 m, pi rad per call),
   posture speed <= MAX_POSTURE_SPEED
-- walks stop on their own when a foot bumper is pressed, and forward walks also when the sonar sees
-  something closer than --obstacle-stop m (and don't start then); NAOqi's own collision stop is
-  off in naoqisim
+- walks use ALMotion.moveTo with NAOqi's external collision protection for "Move" turned on (on every
+  (re)connect, and kept on): NAOqi itself refuses or stops a walk toward an obstacle in its security
+  area (sonar, fed by ALNavigation's safety loop); a walk that ends short of what was commanded is
+  reported as `obstacle`. Walking is refused while that protection isn't running. Walks also stop
+  when a foot bumper gets pressed
+- `go` turns, then walks straight up to GO_MAX_DISTANCE m
 - camera images: every successful result carries one JPEG with the top view above the bottom view
   ("images", --auto-image) and ground-distance lines (--image-grid); `look` grabs it without moving,
-  `look_around` and `scan` turn the head (clamped, joint speed <= MAX_JOINT_SPEED) and return one
-  panorama; a missing camera only warns
-- `scan`, `go` and `approach` measure free floor from the cameras (perception.py): `go` walks up to
-  GO_MAX_DISTANCE m in one call and stops by itself STOP_MARGIN m before anything in its lane, on
-  top of the sonar and bumper stops every walk has
-- one movement at a time; stop and rest always run and interrupt it
+  `look_around` turns the head (clamped, joint speed <= MAX_JOINT_SPEED) and returns one panorama;
+  a missing camera only warns
+- one movement at a time; rest always runs and interrupts it
 - walking needs an awake, standing robot, finite odometry and no unresolved fall
 - a fall stops the current movement and blocks walking until stand succeeds
 - losing the client (no request for --client-timeout s, or the caller hangs up during a
   movement) and shutting down (SIGTERM/SIGINT) stop movement and put the robot in rest
-- the fall manager, foot-contact and collision protections are never touched
+- the fall manager, foot-contact and self-collision protections are never touched; the external
+  collision protection for Move is only ever turned on
+- NAOqi's own behaviours (autonomous life, basic awareness = face tracking, autonomous moves,
+  breathing / idle posture) are turned off on every (re)connect and kept off, so the robot only
+  moves when told to; the bridge leaves them off when it exits
 """
 from __future__ import print_function
 
@@ -47,7 +51,6 @@ from SocketServer import ThreadingMixIn
 
 from PIL import Image, ImageDraw
 
-import perception
 from common import MAX_JOINT_SPEED, MAX_POSTURE_SPEED, clamp, end_limp, parse_args, proxies
 
 MAX_WALK_DISTANCE = 1.0  # m per walk_to
@@ -69,28 +72,19 @@ HEAD_TIMEOUT = 3.0                  # s to reach a head angle
 FRAME_WAIT = 0.3                    # s after the head stops, so the next frame (5 fps) shows the new view
 SWEEP_YAWS = (1.6, 0.8, 0.0, -0.8, -1.6)  # rad; 61 deg FOV each, so about +-150 deg in total
 GO_MAX_DISTANCE = 3.0               # m per go
-STOP_MARGIN = 0.3                   # m; go stops this far before an obstacle in its lane
-LANE_HALF_WIDTH = 0.2               # m; the robot is ~0.3 m wide at the shoulders
-GO_PERIOD = 0.2                     # s between go's camera checks
-MAX_TURN_SPEED = 0.5                # normalized moveToward theta while go holds its heading
-APPROACH_TRIES = 3
-BODY_FREE_YAW = 0.3                 # rad; beyond this head yaw the bottom camera sees the robot's arms
-BOTTOM_EDGE = 0.1                   # of the width; the bottom camera's corners see the hands
-FLOOR_SONAR_MIN = 0.5               # m; learn a new floor colour only with no sonar echo closer
-SONAR_CONE = 1.05                   # rad; a sonar can echo off things up to ~60 deg to its side
-SIDE_PITCH = 0.5                    # rad; scan looks down to the sides (NAOqi allows ~0.2-0.35 there)
-MAP_TRAVEL = 0.6                    # m of walking (odometry) an obstacle point is remembered for
-MAP_MAX_POINTS = 4000
-MAP_RADIUS = 1.5                    # m around the robot that go takes remembered points from
+SHORT_M, SHORT_RAD = 0.05, 0.1      # a completed walk this much short of the command was stopped by NAOqi
+MAX_SAY_CHARS = 300                 # per say call
+HFOV = 1.064                        # rad, NAO V5 cameras (Webots Nao.proto uses the same)
+AUTONOMY_MODULES = ("ALAutonomousLife", "ALBasicAwareness", "ALAutonomousMoves")
+AUTONOMY_CHECK_PERIOD = 2.0         # s between the monitor's checks that autonomy stayed off
 
 D = "Device/SubDeviceList/"
 BATTERY_KEY = D + "Battery/Charge/Sensor/Value"  # 0..1; ALBattery.getBatteryCharge() is 0 in naoqisim
+BATTERY_CURRENT_KEY = D + "Battery/Current/Sensor/Value"  # A, positive while charging
 SONAR_KEYS = [D + "US/Left/Sensor/Value", D + "US/Right/Sensor/Value"]
 TILT_KEYS = [D + "InertialSensor/AngleX/Sensor/Value", D + "InertialSensor/AngleY/Sensor/Value"]
 BUMPER_KEYS = [D + "LFoot/Bumper/Left/Sensor/Value", D + "LFoot/Bumper/Right/Sensor/Value",
                D + "RFoot/Bumper/Left/Sensor/Value", D + "RFoot/Bumper/Right/Sensor/Value"]
-SONAR_NOTE = ("2.55 = no echo, NOT proof of free space: the two cones point ~30 deg left/right and "
-              "miss surfaces that aren't square to them. 0.25 = 0.25 m or closer.")
 FALLEN_FAMILIES = ("LyingBack", "LyingBelly", "LyingLeft", "LyingRight", "Back", "Belly", "Left", "Right")
 NAN_ODOMETRY = ("ALMotion odometry is NaN (seen in naoqisim after emulation stalls, NOTES.md): "
                 "walks would silently do nothing. Restart naoqisim.")
@@ -141,10 +135,12 @@ def pose(values):
 class Robot(object):
     """NAOqi proxies for one thread, created on first use and again after NAOqi restarts."""
 
-    def __init__(self, args, sonar=False):
+    def __init__(self, args, sonar=False, quiet=False):
         self.args = args
         self.sonar = sonar
+        self.quiet = quiet  # turn NAOqi's own behaviours off on every (re)connect
         self.p = None
+        self.ap = {}  # the autonomy modules this NAOqi has
 
     def get(self):
         if self.p is None:
@@ -154,6 +150,15 @@ class Robot(object):
                     proxies(self.args, "ALSonar")["ALSonar"].subscribe(SONAR_NAME)
                 except RuntimeError as e:
                     log("WARNING: no sonar: %s" % naoqi_message(e))
+            for optional in ("ALNavigation", "ALTextToSpeech"):  # ALNavigation: obstacle protection status
+                try:
+                    p.update(proxies(self.args, optional))
+                except RuntimeError:
+                    pass
+            self.ap = autonomy_proxies(self.args)
+            if self.quiet:
+                log("autonomy off: %s" % json.dumps(quiet_autonomy(self.ap, p["ALMotion"])))
+                collision_protection_on(p["ALMotion"])
             self.p = p
         return self.p
 
@@ -172,7 +177,7 @@ class Robot(object):
 
 
 class Movement(object):
-    """The single movement slot. stop/rest set stop_requested; the running move sees it and ends."""
+    """The single movement slot. rest (and falls, lost clients) set stop_requested; the running move sees it and ends."""
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -185,8 +190,8 @@ class Movement(object):
         if self.hold:
             raise Refused("rest is in progress; wait for it, then call stand")
         if not self._lock.acquire(False):
-            raise Refused("busy: %s is still running (one movement at a time). Call stop or rest "
-                          "to interrupt it, or wait for it to finish." % self.current)
+            raise Refused("busy: %s is still running (one movement at a time). Wait for it to "
+                          "finish, or call rest to interrupt it." % self.current)
         self.current = name
         self.reason = None
         self.stop_requested.clear()
@@ -213,11 +218,6 @@ class Movement(object):
                 p[module].stopMove()
             except Exception as e:
                 log("WARNING: %s.stopMove failed: %s" % (module, naoqi_message(e)))
-
-    def wait_idle(self, timeout):
-        deadline = time.time() + timeout
-        while self.current is not None and time.time() < deadline:
-            time.sleep(0.05)
 
 
 class FallGuard(object):
@@ -264,13 +264,20 @@ def upright(pose, tilt):
                 or abs(tilt[1]) > 0.35)
 
 
+def grid_row(distance, size, pose):
+    """Image row of the floor `distance` m ahead of the camera (pose in FRAME_ROBOT), straight ahead."""
+    width, height = size
+    focal = (width / 2.0) / math.tan(HFOV / 2)
+    return height / 2.0 + focal * math.tan(math.atan2(pose[2], distance) - pose[4])
+
+
 def draw_grid(image, distances, pose):
     """Draw a line where the ground is d m ahead of the camera, for each d. Returns the distances drawn."""
     width, rows = image.size
     draw = ImageDraw.Draw(image)
     drawn = []
     for distance in distances:
-        row = perception.grid_row(distance, image.size, pose)
+        row = grid_row(distance, image.size, pose)
         if not 0 <= row < rows:
             continue
         draw.line([(0, row), (width, row)], fill=(255, 230, 0))
@@ -393,7 +400,6 @@ movement = Movement()
 guard = FallGuard()
 lease = Lease(0)  # replaced in main() with --client-timeout
 camera = Camera(None)  # replaced in main() with the NAOqi address
-obstacle_stop_m = 0.4  # replaced in main() with --obstacle-stop
 move_config = []  # replaced in main() with --max-step-x
 
 
@@ -401,9 +407,9 @@ def read_state(p):
     motion, posture, memory = p["ALMotion"], p["ALRobotPosture"], p["ALMemory"]
     odometry = motion.getRobotPosition(True)
     family = posture.getPostureFamily()
-    values = memory.getListData([BATTERY_KEY] + SONAR_KEYS + BUMPER_KEYS)
-    battery, sonar_left, sonar_right = values[:3]
-    bumpers = [bool(v and v > 0.5) for v in values[3:]]
+    values = memory.getListData(SONAR_KEYS + BUMPER_KEYS)
+    sonar_left, sonar_right = values[:2]
+    bumpers = [bool(v and v > 0.5) for v in values[2:]]
     warnings = []
     if is_nan(odometry):
         warnings.append(NAN_ODOMETRY)
@@ -416,14 +422,23 @@ def read_state(p):
         "walk_blocked_by_fall": guard.fallen,
         "awake": motion.robotIsWakeUp(),
         "odometry": None if is_nan(odometry) else pose(odometry),
-        "battery_percent": None if battery is None else rounded(battery * 100, 0),
-        "sonar_m": {"left": rounded(sonar_left, 2), "right": rounded(sonar_right, 2), "note": SONAR_NOTE},
+        "sonar_m": {"left": rounded(sonar_left, 2), "right": rounded(sonar_right, 2)},
         "bumpers": {"left_foot": bumpers[0] or bumpers[1], "right_foot": bumpers[2] or bumpers[3]},
         "busy": movement.current,
         "fall_count": guard.count,
         "last_fall": guard.last,
         "warnings": warnings,
     }
+
+
+def read_battery(p):
+    """{"percent", "charging"} for every reply, or None when NAOqi can't be read."""
+    try:
+        charge, current = p["ALMemory"].getListData([BATTERY_KEY, BATTERY_CURRENT_KEY])
+    except Exception:
+        return None
+    return {"percent": None if charge is None else rounded(charge * 100, 0),
+            "charging": bool(current and current > 0.05)}
 
 
 def view_of(p, names=("top", "bottom")):
@@ -442,15 +457,8 @@ def attach_view(p, result):
         result.setdefault("warnings", []).append(NO_IMAGE)
 
 
-def obstacle_ahead(memory):
-    """The closest sonar distance if it's below the stop distance, else None."""
-    seen = [v for v in memory.getListData(SONAR_KEYS) if v is not None and not math.isnan(v)]
-    near = min(seen) if seen else None
-    return near if near is not None and near < obstacle_stop_m else None
-
-
-def bumper_pressed(memory):
-    return any(v and v > 0.5 for v in memory.getListData(BUMPER_KEYS))
+def pressed_bumpers(memory):
+    return set(key for key, v in zip(BUMPER_KEYS, memory.getListData(BUMPER_KEYS)) if v and v > 0.5)
 
 
 def protections(p):
@@ -461,6 +469,119 @@ def protections(p):
         "external_collision_arms": motion.getExternalCollisionProtectionEnabled("Arms"),
         "self_collision_arms": motion.getCollisionProtectionEnabled("Arms"),
     }
+
+
+def collision_protection_on(motion):
+    """NAOqi's own obstacle stop for walks (ALMotion external collision protection, "Move")."""
+    attempt("ALMotion.setExternalCollisionProtectionEnabled", motion.setExternalCollisionProtectionEnabled,
+            "Move", True)
+
+
+def start_obstacle_protection(p):
+    """Make sure NAOqi's obstacle protection is running; the robot must be awake. ALNavigation's safety
+    loop, which feeds the protection its sonar obstacles, only starts when the protection is turned on
+    while the robot is awake (NAOqi 2.1.4; turning it on again when it's already on does nothing), so
+    turn it off and on while the robot stands still. Returns obstacle_protection(p)."""
+    status = obstacle_protection(p)
+    if status["running"] is False:
+        log("NAOqi's obstacle protection isn't running, restarting it")
+        motion = p["ALMotion"]
+        attempt("ALMotion.setExternalCollisionProtectionEnabled", motion.setExternalCollisionProtectionEnabled,
+                "Move", False)
+        collision_protection_on(motion)
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            time.sleep(0.2)
+            status = obstacle_protection(p)
+            if status["running"]:
+                break
+    elif not status["enabled"]:
+        collision_protection_on(p["ALMotion"])
+        status = obstacle_protection(p)
+    return status
+
+
+def obstacle_protection(p):
+    """{"enabled": NAOqi's Move collision protection, "running": its obstacle feed (ALNavigation's safety
+    loop), None without ALNavigation}."""
+    running = None
+    if "ALNavigation" in p:
+        try:
+            running = p["ALNavigation"]._isSafetyLoopRunning()
+        except RuntimeError:
+            running = None
+    return {"enabled": p["ALMotion"].getExternalCollisionProtectionEnabled("Move"), "running": running}
+
+
+def autonomy_proxies(args):
+    """{name: ALProxy} for the AUTONOMY_MODULES this NAOqi has (naoqisim may lack some)."""
+    found = {}
+    for name in AUTONOMY_MODULES:
+        try:
+            found.update(proxies(args, name))
+        except RuntimeError:
+            pass
+    return found
+
+
+def attempt(what, fn, *args):
+    """Call fn; on any error (missing module or method on this NAOqi) only warn."""
+    try:
+        return fn(*args)
+    except Exception as e:
+        log("WARNING: %s failed: %s" % (what, naoqi_message(e)))
+        return None
+
+
+def quiet_motion(motion):
+    """Breathing and idle posture off (wakeUp may turn them back on)."""
+    for method in ("setBreathEnabled", "setIdlePostureEnabled"):
+        attempt("ALMotion.%s" % method, lambda m=method: getattr(motion, m)("Body", False))
+
+
+def quiet_autonomy(ap, motion):
+    """Turn off NAOqi's own behaviours so the robot only moves when the bridge tells it:
+    autonomous life (disabling it rests the robot), basic awareness (face / sound tracking),
+    autonomous moves, breathing and idle posture. Returns autonomy_status."""
+    for module, method, args in (("ALAutonomousLife", "setState", ("disabled",)),
+                                 ("ALBasicAwareness", "stopAwareness", ()),
+                                 ("ALAutonomousMoves", "setExpressiveListeningEnabled", (False,)),
+                                 ("ALAutonomousMoves", "setBackgroundStrategy", ("none",))):
+        if module in ap:
+            attempt("%s.%s" % (module, method), lambda: getattr(ap[module], method)(*args))
+    quiet_motion(motion)
+    return autonomy_status(ap, motion)
+
+
+def autonomy_status(ap, motion):
+    """What of NAOqi's own behaviours is on; None = not available on this NAOqi."""
+    def read(proxy, method, *args):
+        try:
+            return getattr(proxy, method)(*args)
+        except Exception:
+            return None
+    return {
+        "autonomous_life": read(ap.get("ALAutonomousLife"), "getState"),
+        "basic_awareness": read(ap.get("ALBasicAwareness"), "isAwarenessRunning"),
+        "expressive_listening": read(ap.get("ALAutonomousMoves"), "getExpressiveListeningEnabled"),
+        "background_strategy": read(ap.get("ALAutonomousMoves"), "getBackgroundStrategy"),
+        "breath": read(motion, "getBreathEnabled", "Body"),
+        "idle_posture": read(motion, "getIdlePostureEnabled", "Body"),
+    }
+
+
+def autonomy_back(status):
+    """The behaviours in status that would move the robot on their own (ignoring breathing)."""
+    back = []
+    if status["autonomous_life"] not in (None, "disabled"):
+        back.append("autonomous life %s" % status["autonomous_life"])
+    if status["basic_awareness"]:
+        back.append("basic awareness")
+    if status["expressive_listening"]:
+        back.append("expressive listening")
+    if status["background_strategy"] not in (None, "none"):
+        back.append("background strategy %s" % status["background_strategy"])
+    return back
 
 
 def stop_and_rest(p, reason):
@@ -593,9 +714,8 @@ def turn_head(call, yaw, pitch):
     return not movement.stop_requested.is_set()
 
 
-def sweep(call, yaws, pitch=0.0, side_pitch=None):
+def sweep(call, yaws, pitch=0.0):
     """Turn the head to each yaw and grab top + bottom Frames there; face forward again after.
-    side_pitch: the pitch to use instead where |yaw| > BODY_FREE_YAW.
     Returns (outcome, [[top, bottom] per yaw that was reached], missing frame count)."""
     motion = call.p["ALMotion"]
     if guard.fallen:
@@ -606,8 +726,7 @@ def sweep(call, yaws, pitch=0.0, side_pitch=None):
     columns, missing, outcome = [], 0, "completed"
     try:
         for yaw in yaws:
-            tilt = side_pitch if side_pitch is not None and abs(yaw) > BODY_FREE_YAW else pitch
-            if not turn_head(call, max(-HEAD_YAW_MAX, min(HEAD_YAW_MAX, yaw)), max(HEAD_PITCH_MIN, min(HEAD_PITCH_MAX, tilt))):
+            if not turn_head(call, max(-HEAD_YAW_MAX, min(HEAD_YAW_MAX, yaw)), pitch):
                 outcome = movement.reason or "stopped"
                 break
             frames = [camera.frame(call.p, name) for name in ("top", "bottom")]
@@ -636,154 +755,33 @@ def look_around(call):
     return result
 
 
-class Seen(object):
-    """What a set of Frames shows: free-floor samples (camera, x, y, kind) in FRAME_ROBOT and the
-    floor colour they were measured against (None: free space unknown).
-
-    Bottom-camera frames only count while the head looks ahead: turned sideways that camera sees
-    the robot's own hands and shoulders. The floor colour comes from the ground at the feet (bottom
-    camera, ahead). Right in front of a plain wall that patch is wall and everything would look
-    free, so a new colour is only taken when it matches the floor already known (Seen.known), or
-    it hardly shows above the horizon in the top camera (floor can't be there, a wall ahead is), or
-    the sonar has nothing within FLOOR_SONAR_MIN; otherwise the known floor is used."""
-    known = None
-
-    def __init__(self, p, frames):
-        self.frames = [frame for frame in frames if frame and frame.upright
-                       and (frame.camera == "top" or abs(frame.head[0]) < BODY_FREE_YAW)]
-        bottoms = [frame for frame in self.frames if frame.camera == "bottom"]
-        model = perception.floor_model(bottoms[0].image) if bottoms else None
-        if model is not None and not (Seen.known is not None and same_floor(model, Seen.known)):
-            tops = [frame for frame in self.frames if frame.camera == "top" and abs(frame.head[0]) < BODY_FREE_YAW]
-            sky = perception.above_horizon(tops[0].image, tops[0].pose, model) if tops else None
-            sonar = [v for v in p["ALMemory"].getListData(SONAR_KEYS) if v is not None and not math.isnan(v)]
-            if not ((sky is not None and sky < 0.3) or (sonar and min(sonar) >= FLOOR_SONAR_MIN)):
-                model = None
-        if model is not None:
-            Seen.known = model
-        self.floor = Seen.known
-        self.samples = [] if self.floor is None else [
-            (frame.camera,) + sample for frame in self.frames
-            for sample in perception.free_space(frame.image, frame.pose, self.floor,
-                                                edge=BOTTOM_EDGE if frame.camera == "bottom" else 0.0)]
-
-    def colors(self, names=None):
-        """[{"color", "bearing_deg", "distance_m", ...}] for every colour seen, most pixels first."""
-        found = []
-        for name in names or sorted(perception.COLORS):
-            hits = [hit for hit in (perception.find_color(frame.image, frame.pose, name) for frame in self.frames)
-                    if hit]
-            if hits:  # direction from the biggest view of it, distance from the nearest estimate
-                best = dict(max(hits, key=lambda hit: hit["pixels"]), color=name)
-                best.pop("upper_bound", None)
-                measured = [hit for hit in hits if hit["distance_m"] is not None]
-                if measured:
-                    nearest = min(measured, key=lambda hit: hit["distance_m"])
-                    best["distance_m"] = nearest["distance_m"]
-                    if nearest.get("upper_bound"):
-                        best["upper_bound"] = True
-                found.append(best)
-        return sorted(found, key=lambda hit: -hit["pixels"])
-
-
-class LocalMap(object):
-    """Obstacle points seen recently, kept in odometry coordinates, so a sonar echo off a wall that
-    has left the cameras' view (beside the robot) can still be explained. Odometry drifts (the
-    simulator walks ~70-86% of what it reports), so points are dropped once the robot has moved
-    MAP_TRAVEL m (turns count 0.5 m per rad) since they were seen, and they never steer or stop
-    the robot themselves."""
-
-    def __init__(self):
-        self.points = []  # (travel when seen, x, y, kind) in the odometry frame
-        self.travel = 0.0
-        self.last = None
-
-    def moved(self, odom):
-        if self.last is not None:
-            self.travel += math.hypot(odom[0] - self.last[0], odom[1] - self.last[1]) \
-                + 0.5 * abs(angle_diff(odom[2], self.last[2]))
-        self.last = odom
-
-    def add(self, samples, odom):
-        self.moved(odom)
-        c, s = math.cos(odom[2]), math.sin(odom[2])
-        for camera, x, y, kind in samples:
-            if kind != "open":  # "near" from the top camera: something at most this far
-                exact = kind == "obstacle" or camera == "bottom"
-                self.points.append((self.travel, odom[0] + c * x - s * y, odom[1] + s * x + c * y,
-                                    "obstacle" if exact else "near"))
-        self.points = [point for point in self.points if self.travel - point[0] <= MAP_TRAVEL][-MAP_MAX_POINTS:]
-
-    def around(self, odom, radius=MAP_RADIUS):
-        """The remembered points within radius m, as ("memory", x, y, kind) in the robot frame."""
-        self.moved(odom)
-        c, s = math.cos(odom[2]), math.sin(odom[2])
-        near = []
-        for travel, px, py, kind in self.points:
-            dx, dy = px - odom[0], py - odom[1]
-            x, y = c * dx + s * dy, -s * dx + c * dy
-            if self.travel - travel <= MAP_TRAVEL and math.hypot(x, y) <= radius:
-                near.append(("memory", x, y, kind))
-        return near
-
-
-local_map = LocalMap()
-
-
-def same_floor(a, b):
-    return max(abs(x - y) for x, y in zip(a[0], b[0])) <= max(a[1], b[1])
-
-
-def openings(table, min_free=1.0):
-    """Runs of neighbouring clearance bins with at least min_free m: where the robot could go."""
-    runs, run = [], []
-    for entry in table + [None]:
-        if entry is not None and entry["free_m"] >= min_free and not entry.get("upper_bound"):
-            run.append(entry)
-            continue
-        if run:
-            best = max(run, key=lambda e: e["free_m"])
-            runs.append({"from_deg": run[0]["bearing_deg"], "to_deg": run[-1]["bearing_deg"],
-                         "best_bearing_deg": best["bearing_deg"], "free_m": best["free_m"],
-                         "blocked": best["blocked"]})
-        run = []
-    return sorted(runs, key=lambda r: -r["free_m"])
-
-
-def survey(call, yaws=SWEEP_YAWS):
-    """Sweep the head and measure: (outcome, result dict with clearance, openings, colors, panorama)."""
-    outcome, columns, missing = sweep(call, yaws, side_pitch=SIDE_PITCH)
-    seen = Seen(call.p, [frame for frames in columns for frame in frames])
-    odom = call.p["ALMotion"].getRobotPosition(True)
-    if not is_nan(odom):
-        local_map.add(seen.samples, odom)
-    result = {"result": outcome, "images": panorama(columns)}
-    if seen.floor is None:
-        result["warnings"] = ["floor not recognised (right at an obstacle, or a patterned floor): "
-                              "free space unknown, use the image"]
-    else:
-        table = perception.clearance(seen.samples)
-        result.update(clearance=table, openings=openings(table))
-    result["colors"] = seen.colors()
-    if missing and outcome == "completed":
-        result.setdefault("warnings", []).append(NO_IMAGE)
-    return outcome, result
-
-
-@primitive("scan")
-def scan(call):
-    _, result = survey(call)
-    result["state"] = read_state(call.p)
-    return result
+def not_awake_hint(p):
+    """Why wakeUp left the motors off: joints with an active diagnosis error stay limp
+    (ALMotion diagnosis effect), e.g. all of them when the motor boards don't answer."""
+    try:
+        joints = p["ALMotion"].getBodyNames("Body")
+        errors = p["ALMemory"].getListData(["Diagnosis/Active/%s/Error" % j for j in joints])
+        flagged = [j for j, e in zip(joints, errors) if e]
+    except RuntimeError:
+        flagged = []
+    hint = "wakeUp left the motors off. "
+    if flagged:
+        hint += "NAOqi reports active diagnosis errors on %d joints (%s). " % (
+            len(flagged), ", ".join(flagged))
+    return hint + "Tell the human: the robot needs checking, e.g. a reboot (hold the chest button)."
 
 
 @primitive("stand")
 def stand(call):
     was_fallen = guard.fallen
     call.p["ALMotion"].wakeUp()  # on the H25 this only stiffens; after a fall it restores stiffness
+    if not call.p["ALMotion"].robotIsWakeUp():
+        return {"result": "failed", "state": read_state(call.p), "hint": not_awake_hint(call.p)}
+    quiet_motion(call.p["ALMotion"])
     outcome = go_to_posture(call, "StandInit")
     state = read_state(call.p)
-    if outcome == "completed" and state["posture_family"] == "Standing":
+    if (outcome == "completed" and state["awake"] and state["posture_family"] == "Standing"
+            and state["posture"] != "Crouch"):  # NAOqi 2.1 puts Crouch in the Standing family
         guard.clear()
         state = read_state(call.p)
     elif outcome == "completed":
@@ -792,17 +790,6 @@ def stand(call):
     if outcome != "completed" and was_fallen:
         result["hint"] = GET_UP_HINT
     return result
-
-
-@primitive("sit")
-def sit(call):
-    if guard.fallen:
-        raise Refused("the robot fell: call stand first (or rest)")
-    outcome = go_to_posture(call, "Sit")
-    state = read_state(call.p)
-    if outcome == "completed" and state["posture_family"] != "Sitting":
-        outcome = "failed"
-    return {"result": outcome, "state": state}
 
 
 def check_can_walk(call):
@@ -816,39 +803,47 @@ def check_can_walk(call):
     family, name = posture.getPostureFamily(), posture.getPosture()
     if family != "Standing" or name == "Crouch":  # NAOqi 2.1 puts Crouch in the Standing family
         raise Refused("the robot is not standing (posture %s, family %s): call stand first" % (name, family))
+    protection = start_obstacle_protection(call.p)
+    if protection["running"] is None:
+        raise Refused("this NAOqi has no ALNavigation, so it can't stop walks at obstacles: walking is "
+                      "blocked. Tell the human.")
+    if not protection["running"]:
+        raise Refused("NAOqi's obstacle protection doesn't start (ALNavigation's safety loop): walking is "
+                      "blocked. Call rest and tell the human.")
     before = motion.getRobotPosition(True)
     if is_nan(before):
         raise Refused(NAN_ODOMETRY)
     return before
 
 
-def walk_guard(memory, forward, stopped_by):
-    """wait_task check for walks: bumper, and sonar for forward walks."""
+def walk_guard(memory, stopped_by):
+    """wait_task check for walks: a foot bumper that gets pressed during the walk (one already pressed
+    at the start, e.g. a foot against a wall, doesn't block walking away)."""
+    pressed_before = pressed_bumpers(memory)
     def check():
-        if bumper_pressed(memory):
+        if pressed_bumpers(memory) - pressed_before:
             stopped_by["bumper"] = True
             return "bumped"
-        near = obstacle_ahead(memory) if forward else None
-        if near is not None:
-            stopped_by["sonar_m"] = rounded(near, 2)
-            return "obstacle"
         return None
     return check
 
 
 def walk_leg(call, x, y, theta):
-    """One moveTo with the walk guards. Returns (outcome, stopped_by or None)."""
+    """One ALMotion.moveTo with the bumper guard; NAOqi's collision protection refuses or stops walks
+    toward obstacles. Returns (outcome, stopped_by or None); a completed walk that ended short of the
+    command is "obstacle"."""
     motion, memory = call.p["ALMotion"], call.p["ALMemory"]
-    forward = x > 0.02
-    near = obstacle_ahead(memory) if forward else None
-    if near is not None:
-        raise Refused("obstacle %.2f m ahead (sonar; forward walks stop below %.2f m): turn, sidestep "
-                      "(walk_to with y) or back up" % (near, obstacle_stop_m))
     stopped_by = {}
+    before = motion.getRobotPosition(True)
     motion.moveInit()
     task = motion.post.moveTo(x, y, theta, move_config)
     timeout = 20.0 + 20.0 * math.hypot(x, y) + 10.0 * abs(theta)
-    outcome = wait_task(call, motion, task, timeout, check=walk_guard(memory, forward, stopped_by))
+    outcome = wait_task(call, motion, task, timeout, check=walk_guard(memory, stopped_by))
+    delta = odometry_delta(before, motion.getRobotPosition(True))
+    if outcome == "completed" and delta and (
+            math.hypot(x - delta["x"], y - delta["y"]) > SHORT_M or abs(theta - delta["theta"]) > SHORT_RAD):
+        outcome = "obstacle"
+        stopped_by["naoqi"] = "collision protection stopped the walk (obstacle in its security area)"
     return outcome, stopped_by or None
 
 
@@ -884,13 +879,6 @@ def walk_to(call):
     delta = odometry_delta(before, after)
     if delta is None:
         warnings.append(NAN_ODOMETRY)
-    else:
-        commanded_big = math.hypot(x, y) > 0.05 or abs(theta) > 0.1
-        moved = math.hypot(delta["x"], delta["y"]) > 0.02 or abs(delta["theta"]) > 0.05
-        if outcome == "completed" and commanded_big and not moved:
-            outcome = "did_not_move"
-            warnings.append("moveTo finished but odometry did not change: the walk probably did "
-                            "nothing (naoqisim odometry/emulation problem, NOTES.md). Restart naoqisim.")
     return {
         "result": outcome,
         "commanded": {"x": rounded(x), "y": rounded(y), "theta": rounded(theta)},
@@ -909,183 +897,44 @@ def angle_diff(a, b):
     return math.atan2(math.sin(a - b), math.cos(a - b))
 
 
-def unexplained_echo(memory, samples):
-    """The closest sonar echo under the stop distance that the cameras don't explain (nothing seen
-    at about that distance on that side), else None. Explained echoes are left to the camera lane
-    check, which stops closer in; unexplained ones stop go: the sonar catches what the cameras miss
-    (floor-coloured or thin things)."""
-    closest = None
-    for value, side in zip(memory.getListData(SONAR_KEYS), (1, -1)):
-        if value is None or math.isnan(value) or value >= obstacle_stop_m:
-            continue
-        explained = any(kind != "open" and 0 <= side * y + 0.05 and abs(math.atan2(y, x)) <= SONAR_CONE
-                        and (abs(math.hypot(x, y) - value) <= 0.2 if kind == "obstacle"
-                             else value - 0.05 <= math.hypot(x, y) <= value + 0.5)  # "near": at most that far
-                        for _, x, y, kind in samples)
-        if not explained and (closest is None or value < closest):
-            closest = value
-    return closest
-
-
-def walk_ahead(call, distance, heading):
-    """Walk forward up to `distance` m holding odometry heading `heading`, with moveToward, checking
-    the cameras every GO_PERIOD s. Stops STOP_MARGIN m before anything in the robot's lane, and on
-    bumper / sonar echo the cameras can't explain / stop / rest / fall / lost client / timeout.
-    Returns (outcome, details)."""
-    motion, memory = call.p["ALMotion"], call.p["ALMemory"]
-    start = motion.getRobotPosition(True)
-    deadline = time.time() + 20.0 + 30.0 * distance
-    falls = guard.count
-    details, outcome = {}, None
-    if Seen.known is None:  # learn the floor first: a single frame can't tell floor from a plain wall
-        survey(call)
-    motion.moveInit()
-    try:
-        while outcome is None:
-            if movement.stop_requested.is_set():
-                outcome = movement.reason or "stopped"
-            elif guard.count != falls:
-                outcome = "fell"
-            elif call.client_gone():
-                log("client hung up during %s" % movement.current)
-                movement.interrupt(call.p, "client_lost")
-                outcome = "client_lost"
-            elif time.time() > deadline:
-                outcome = "timeout"
-            elif bumper_pressed(memory):
-                details["stopped_by"], outcome = {"bumper": True}, "bumped"
-            if outcome:
-                break
-            lease.touch()
-            seen = Seen(call.p, [camera.frame(call.p, name) for name in ("top", "bottom")])
-            now = motion.getRobotPosition(True)
-            if not seen.samples or is_nan(now):
-                outcome = "blind"  # no floor to measure against, a camera missing, or not upright
-                details["hint"] = "can't measure the floor ahead: call scan, or walk_to a short step"
-                break
-            local_map.add(seen.samples, now)
-            samples = seen.samples
-            echo = unexplained_echo(memory, samples + local_map.around(now))
-            if echo is not None:
-                details["stopped_by"], outcome = {"sonar_m": rounded(echo, 2)}, "obstacle"
-                break
-            remaining = distance - math.hypot(now[0] - start[0], now[1] - start[1])
-            want = angle_diff(heading, now[2])
-            phi, room, straight = perception.best_heading(samples, LANE_HALF_WIDTH, want, STOP_MARGIN, remaining)
-            details["free_ahead_m"] = None if straight is None else rounded(straight + STOP_MARGIN, 2)
-            if remaining <= 0.03:
-                outcome = "arrived"
-            elif room is None or room <= 0.03:
-                outcome = "blocked"
-            else:
-                left, right = perception.side_gaps(samples, LANE_HALF_WIDTH)
-                sideways = 0.0 if left is None or right is None else max(-0.5, min(0.5, left - right))
-                turn = max(-MAX_TURN_SPEED, min(MAX_TURN_SPEED, 2.0 * phi))
-                # walk while the lane straight ahead is clear, slower near the end; else turn in place
-                forward = 0.0 if straight is None or straight <= 0.03 else min(1.0, max(0.3, min(straight, remaining) / 0.3))
-                motion.moveToward(forward if abs(phi) < 0.35 else 0.3 * forward, sideways if forward else 0.0,
-                                  turn, move_config)
-                time.sleep(GO_PERIOD)
-    finally:
-        if outcome != "rested":
-            motion.stopMove()
-            motion.waitUntilMoveIsFinished()
-    if outcome in ("timeout", "client_lost"):
-        movement.interrupt(call.p, outcome)
-    if outcome == "client_lost":
-        end_limp(call.p["ALMotion"])
-    if guard.count != falls:
-        outcome = "fell"
-    return outcome, details
-
-
-def go_to(call, bearing, distance):
-    """Turn to `bearing` rad, then walk_ahead `distance` m. Returns the go result without state."""
-    motion = call.p["ALMotion"]
-    before = check_can_walk(call)
-    started = time.time()
-    outcome, details = "completed", {}
-    if abs(bearing) > 0.05:
-        outcome, stopped_by = walk_leg(call, 0.0, 0.0, bearing)
-        details["stopped_by"] = stopped_by
-    if outcome == "completed" and distance > 0.03:
-        heading = motion.getRobotPosition(True)[2]
-        outcome, details = walk_ahead(call, distance, heading)
-    elif outcome == "completed":
-        outcome = "arrived"
-    after = motion.getRobotPosition(True)
-    result = {"result": outcome, "commanded": {"bearing_deg": rounded(math.degrees(bearing), 1),
-                                                "distance_m": rounded(distance, 2)},
-              "odometry_before": pose(before), "odometry_after": None if is_nan(after) else pose(after),
-              "odometry_delta": odometry_delta(before, after), "duration_s": round(time.time() - started, 1)}
-    result.update(details)
-    return result
-
-
 @primitive("go")
 def go(call):
+    """Turn to the bearing, then walk straight (moveTo holds the heading on odometry)."""
+    motion = call.p["ALMotion"]
     distance = max(0.0, call.args.get("distance_m", GO_MAX_DISTANCE))
     clamped = []
     if distance > GO_MAX_DISTANCE:
         clamped.append("distance %.2f m clamped to %.1f m" % (distance, GO_MAX_DISTANCE))
         distance = GO_MAX_DISTANCE
-    bearing = math.radians(call.args["bearing_deg"])
-    if abs(bearing) > MAX_WALK_TURN:
-        bearing = angle_diff(bearing, 0.0)
-    result = go_to(call, bearing, distance)
-    result["clamped"] = clamped
-    result["state"] = read_state(call.p)
-    return result
+    bearing = angle_diff(math.radians(call.args["bearing_deg"]), 0.0)
+    before = check_can_walk(call)
+    started = time.time()
+    outcome, stopped_by = "completed", None
+    if abs(bearing) > 0.05:
+        outcome, stopped_by = walk_leg(call, 0.0, 0.0, bearing)
+    if outcome == "completed" and distance > 0.03:
+        outcome, stopped_by = walk_leg(call, distance, 0.0, 0.0)
+    if outcome == "completed":
+        outcome = "arrived"
+    after = motion.getRobotPosition(True)
+    return {"result": outcome,
+            "commanded": {"bearing_deg": rounded(math.degrees(bearing), 1), "distance_m": rounded(distance, 2)},
+            "clamped": clamped, "stopped_by": stopped_by,
+            "odometry_before": pose(before), "odometry_after": None if is_nan(after) else pose(after),
+            "odometry_delta": odometry_delta(before, after), "duration_s": round(time.time() - started, 1),
+            "state": read_state(call.p)}
 
 
-@primitive("approach")
-def approach(call):
-    """Find the colour (ahead first, else with a sweep) and go to it, up to APPROACH_TRIES times."""
-    color = call.args["color"]
-    stop_at = STOP_MARGIN + 0.15
-    legs = []
-    result = {"result": "not_found", "color": color}
-    for _ in range(APPROACH_TRIES):
-        hits = Seen(call.p, [camera.frame(call.p, name) for name in ("top", "bottom")]).colors([color])
-        if not hits:
-            outcome, survey_result = survey(call)
-            if outcome != "completed":
-                result.update(result=outcome)
-                break
-            hits = [hit for hit in survey_result["colors"] if hit["color"] == color]
-            if not hits:
-                survey_result.pop("images", None)
-                result.update(result="not_found", survey=survey_result)
-                break
-        hit = hits[0]
-        result["target"] = hit
-        if hit["distance_m"] is not None and hit["distance_m"] <= stop_at:
-            result["result"] = "arrived"
-            break
-        distance = GO_MAX_DISTANCE if hit["distance_m"] is None else min(GO_MAX_DISTANCE, hit["distance_m"])
-        leg = go_to(call, math.radians(hit["bearing_deg"]), distance)
-        legs.append(leg)
-        if leg["result"] not in ("arrived", "blocked", "obstacle"):
-            result["result"] = leg["result"]
-            break
-        result["result"] = "blocked"  # until the next look says the colour is what's in the way
-    else:
-        hits = Seen(call.p, [camera.frame(call.p, name) for name in ("top", "bottom")]).colors([color])
-        if hits:
-            result["target"] = hits[0]
-            if hits[0]["distance_m"] is not None and hits[0]["distance_m"] <= stop_at:
-                result["result"] = "arrived"
-    result["legs"] = legs
-    result["state"] = read_state(call.p)
-    return result
-
-
-@primitive("stop")
-def stop(call):
-    running = movement.current
-    movement.interrupt(call.p, "stopped")
-    movement.wait_idle(5.0)
-    return {"result": "stopped", "interrupted": running, "state": read_state(call.p)}
+@primitive("say")
+def say(call):
+    """Speak without waiting for it (it can run during a walk); NAOqi queues overlapping calls."""
+    if "ALTextToSpeech" not in call.p:
+        raise Refused("this NAOqi has no ALTextToSpeech")
+    text = " ".join(call.args["text"].split())[:MAX_SAY_CHARS]
+    if not text:
+        raise BadArgs("text is empty")
+    call.p["ALTextToSpeech"].post.say(text)
+    return {"result": "speaking", "text": text}
 
 
 @primitive("rest")
@@ -1103,7 +952,7 @@ def load_registry():
         entries = json.load(f)["primitives"]
     registry = dict((entry["name"], entry) for entry in entries)
     for entry in entries:
-        if entry.get("kind") not in ("read", "move", "override"):
+        if entry.get("kind") not in ("read", "action", "move", "override"):
             raise SystemExit("primitives.json: %s has bad kind %r" % (entry["name"], entry.get("kind")))
     missing = set(registry) - set(HANDLERS)
     extra = set(HANDLERS) - set(registry)
@@ -1176,7 +1025,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             p = self.server.robot.get()
             return self.reply(200, {"ok": True, "naoqi": "%s:%d" % (self.server.args.ip, self.server.args.port),
-                                    "busy": movement.current, "protections": protections(p)})
+                                    "busy": movement.current, "protections": protections(p),
+                                    "obstacle_protection": obstacle_protection(p),
+                                    "autonomy": autonomy_status(self.server.robot.ap, p["ALMotion"])})
         except RuntimeError as e:
             self.server.robot.check()
             return self.reply(503, {"ok": False, "error": "NAOqi unreachable: %s" % naoqi_message(e)})
@@ -1224,19 +1075,22 @@ class Handler(BaseHTTPRequestHandler):
                         raise
                     call.p = p = self.server.robot.get()  # NAOqi restarted: reads are safe to retry
                     result = HANDLERS[name](call)
-            if self.server.args.auto_image and name not in ("look", "look_around", "scan"):
+            if self.server.args.auto_image and name not in ("look", "look_around", "say"):
                 attach_view(call.p, result)  # after the movement ended: the view it ended with
+            result["battery"] = read_battery(call.p)
             return self.reply(200, {"ok": True, "result": result})
         except BadArgs as e:
             return self.reply(400, {"ok": False, "error": "bad arguments for %s: %s" % (name, e)})
         except Refused as e:
             log("refused %s: %s" % (name, e))
-            return self.reply(409, {"ok": False, "error": "refused: %s" % e, "state": self.try_state(p)})
+            return self.reply(409, {"ok": False, "error": "refused: %s" % e, "state": self.try_state(p),
+                                    "battery": read_battery(p) if p is not None else None})
         except RuntimeError as e:
             log("NAOqi error in %s: %s" % (name, naoqi_message(e)))
             self.server.robot.check()
             return self.reply(502, {"ok": False, "error": "NAOqi error in %s: %s" % (name, naoqi_message(e)),
-                                    "state": self.try_state(p)})
+                                    "state": self.try_state(p),
+                                    "battery": read_battery(p) if p is not None else None})
 
     @staticmethod
     def try_state(p):
@@ -1252,9 +1106,11 @@ class Server(ThreadingMixIn, HTTPServer):
 
 
 def monitor(args, shutting_down):
-    """Background checks every MONITOR_PERIOD: falls (-> stop) and the client lease (-> rest)."""
+    """Background checks every MONITOR_PERIOD: falls (-> stop) and the client lease (-> rest);
+    every AUTONOMY_CHECK_PERIOD that NAOqi's own behaviours stayed off (-> rest, off again)."""
     robot = Robot(args)
     last_stamp = last_p = None
+    next_autonomy_check = 0.0
     while not shutting_down.is_set():
         try:
             p = robot.get()
@@ -1281,6 +1137,20 @@ def monitor(args, shutting_down):
                 if movement.current or p["ALMotion"].robotIsWakeUp():
                     log("no request from the client for %.0f s" % lease.timeout)
                     stop_and_rest(p, "client lost")
+            if time.time() >= next_autonomy_check:
+                next_autonomy_check = time.time() + AUTONOMY_CHECK_PERIOD
+                status = autonomy_status(robot.ap, p["ALMotion"])
+                back = autonomy_back(status)
+                if back:  # e.g. the chest button was double-pressed
+                    log("autonomy re-enabled (%s), disabling" % ", ".join(back))
+                    stop_and_rest(p, "autonomy re-enabled")
+                    log("autonomy off: %s" % json.dumps(quiet_autonomy(robot.ap, p["ALMotion"])))
+                elif status["breath"] or status["idle_posture"]:
+                    log("breathing / idle posture back on, disabling")
+                    quiet_motion(p["ALMotion"])
+                if not p["ALMotion"].getExternalCollisionProtectionEnabled("Move"):
+                    log("external collision protection for Move is off, turning it on")
+                    collision_protection_on(p["ALMotion"])
         except RuntimeError as e:
             log("monitor: NAOqi error: %s" % naoqi_message(e))
             robot.check()
@@ -1289,7 +1159,7 @@ def monitor(args, shutting_down):
 
 
 def main():
-    global lease, camera, obstacle_stop_m, move_config
+    global lease, camera, move_config
 
     def extra(parser):
         parser.add_argument("--listen", default="0.0.0.0")
@@ -1303,9 +1173,6 @@ def main():
         parser.add_argument("--image-grid", type=int, choices=(0, 1),
                             default=int(os.environ.get("BRIDGE_IMAGE_GRID", 1)),
                             help="draw ground-distance lines on camera images (1 = on)")
-        parser.add_argument("--obstacle-stop", type=float,
-                            default=float(os.environ.get("BRIDGE_OBSTACLE_STOP_M", 0.4)),
-                            help="forward walks stop / don't start when the sonar sees something closer (m)")
         parser.add_argument("--max-step-x", type=float,
                             default=float(os.environ.get("BRIDGE_MAX_STEP_X", 0.06)),
                             help="gait step length (m); NAOqi's default is 0.04, its maximum 0.08")
@@ -1313,17 +1180,17 @@ def main():
     args = parse_args(__doc__, extra)
     lease = Lease(args.client_timeout)
     camera = Camera(args)
-    obstacle_stop_m = args.obstacle_stop
     move_config = [["MaxStepX", min(0.08, max(0.02, args.max_step_x))]]
     server = Server((args.listen, args.listen_port), Handler)
     server.args = args
     server.registry = load_registry()
-    server.robot = Robot(args, sonar=True)
+    server.robot = Robot(args, sonar=True, quiet=True)
     try:
         p = server.robot.get()
         log("connected to NAOqi at %s:%d, protections %s" % (args.ip, args.port, json.dumps(protections(p))))
-        if not all(protections(p).values()):
-            log("WARNING: some protections are off on this NAOqi; the bridge never changes them")
+        off = sorted(name for name, on in protections(p).items() if not on)
+        if off:
+            log("protections off on this NAOqi: %s" % ", ".join(off))
     except RuntimeError as e:
         log("WARNING: NAOqi not reachable yet at %s:%d (%s); will retry per request"
             % (args.ip, args.port, naoqi_message(e)))
@@ -1336,9 +1203,9 @@ def main():
         thread.daemon = True
         thread.start()
     log("bridge listening on %s:%d, primitives: %s, client timeout %.0f s, auto image %s, "
-        "grid %s, obstacle stop %.2f m, move config %s"
+        "grid %s, move config %s"
         % (args.listen, args.listen_port, ", ".join(sorted(server.registry)), args.client_timeout,
-           "on" if args.auto_image else "off", "on" if args.image_grid else "off", obstacle_stop_m,
+           "on" if args.auto_image else "off", "on" if args.image_grid else "off",
            move_config))
     while not shutting_down.is_set():
         time.sleep(0.2)

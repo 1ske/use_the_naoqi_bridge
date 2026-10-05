@@ -4,8 +4,8 @@ Runs on the Mac with any Python 3 (no Webots needed). Only understands what our 
 Solids with a translation, an optional rotation about z and a Box geometry (the floor is skipped).
 
     python3 webots/tools/world_rays.py webots/worlds/corridor_complex.wbt X Y HEADING_DEG
-prints the distance to the nearest wall every 10 degrees relative to HEADING_DEG, left to right,
-in the same form as the bridge's scan clearance. X, Y, heading: from truth.py.
+prints the distance to the nearest wall every 10 degrees relative to HEADING_DEG, left to right.
+X, Y, heading: from truth.py.
 """
 import math
 import re
