@@ -1,13 +1,16 @@
 {
-  "built_at": "2026-10-06T09:51:20+00:00",
-  "built_from_commit": "2408a471806d3c7456bdb41a4318eae32f8d9e6c",
+  "built_at": "2026-10-06T09:56:23+00:00",
+  "built_from_commit": "4713eb6c51952456d5479160b6cad12ee7257edd",
   "uncommitted_changes_in_image_sources": false,
   "images": {
-    "naoqi-pilot/base": "sha256:688143ac193900772ecd467e3e1265a2a39ebed936a3ad177f98538beefca085",
-    "naoqi-pilot/claude": "sha256:c4cfe5914eaae4f73f705e080d850935421eb58c0f4566d7dbc753e6f78950ee",
-    "naoqi-pilot/opencode": "sha256:3c184a316ff9e4c0285ab6e8519f68cbf210fd4e30fc4307650feb92b1f335e0",
-    "naoqi-pilot/agy": "sha256:899fd955eb492b516eb727aaab1bc5f92741a8c4f5ed799a0e1a246ce7802d25",
-    "naoqi-pilot/proxy": "sha256:c1d39fdac0a1eec9cc9091216d9cf66075f821f7475947381d2b881f29ed76bf"
+    "naoqi-pilot/base": "sha256:20f0905f0a904cace743a6092d8eb6168df1de60c590d4cd6cb297b37927eecd",
+    "naoqi-pilot/claude": "sha256:fed16c9338ad52a6096eaa016c02070e4bd66deeb87b7a342b648fc038c3eff1",
+    "naoqi-pilot/opencode": "sha256:05a68809b6a025aaa4f098441385ef7f2be42b0b2abae22c2d6726749dc4947f",
+    "naoqi-pilot/agy": "sha256:283fae5f7fc0b06813745388b48874733327c9b1d5215e01836fc857c169b780",
+    "naoqi-pilot/proxy": "sha256:51bf421e74e9b436ae4d275f31a0f5505382f8553cc95dd34a3553d6bf3b34f5",
+    "naoqi-pilot/claude-verify": "sha256:3322c5235081534eaea0d025872b7736ec24e00dafcfba62f72bb897f9b6d1d8",
+    "naoqi-pilot/opencode-verify": "sha256:a3ddeaac810b3d619201f87a0b304c4de4e2cf77ff6db1024e8f426bd92280f7",
+    "naoqi-pilot/agy-verify": "sha256:7d5793ba801366f4ceb4a3af2e4ab407dda2ee99113b92bb3e74d811acba7410"
   },
   "harness_versions": {
     "claude": "2.1.280",
