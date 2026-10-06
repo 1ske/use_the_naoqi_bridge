@@ -1,0 +1,22 @@
+{
+  "_comment": "Success areas of the simulated tasks (section 5.1.1): the part of the last leg within d of the goal surface. Coordinates come from the world files (pilot/success.py reads the named solids, which are axis-aligned boxes); the last leg runs north in both worlds. A run succeeds if it ended with rest, the robot was upright at that moment, and the torso, projected on the floor, was in the area.",
+  "d_default": 1.0,
+  "upright": {
+    "_comment": "Upright = the torso's up axis is within this angle of vertical at the moment the bridge receives rest. A standing or crouching NAO is within a few degrees; a fallen one is near 90.",
+    "max_tilt_deg": 45
+  },
+  "worlds": {
+    "corridor": {
+      "file": "webots/worlds/corridor.wbt",
+      "task": "Corridor",
+      "goal": {"solid": "END_PANEL", "surface": "south face"},
+      "last_leg": {"west_wall": "WEST_WALL", "east_wall": "EAST_WALL", "starts_at": "south end of WEST_WALL"}
+    },
+    "corridor_complex": {
+      "file": "webots/worlds/corridor_complex.wbt",
+      "task": "Complex corridor",
+      "goal": {"solid": "RED_WALL", "surface": "south face"},
+      "last_leg": {"west_wall": "WEST_WALL_6", "east_wall": "EAST_WALL_6", "starts_at": "south end of WEST_WALL_6"}
+    }
+  }
+}

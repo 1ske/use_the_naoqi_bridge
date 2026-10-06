@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "deny": [
+      "command(*)",
+      "unsandboxed(*)",
+      "read_file(*)",
+      "write_file(*)",
+      "read_url(*)",
+      "execute_url(*)"
+    ],
+    "allow": [
+      "mcp(naoqi/*)"
+    ]
+  },
+  "trustedWorkspaces": ["/work"]
+}

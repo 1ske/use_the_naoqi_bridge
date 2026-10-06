@@ -1,0 +1,41 @@
+{
+  "_comment": "Fake-LLM script (Claude Code tool names) for a test run on Corridor that stops short: east to the turn, turn left, only 1 m north, rest (outside the success area). Not run: the first success-route attempt (corridor-A5-20261006T072728Z-test) already ended 1.21 m from the panel, outside the area.",
+  "steps": [
+    {
+      "tool": "mcp__naoqi__get_state",
+      "args": {}
+    },
+    {
+      "tool": "mcp__naoqi__stand",
+      "args": {}
+    },
+    {
+      "tool": "mcp__naoqi__go",
+      "args": {
+        "bearing_deg": 0,
+        "distance_m": 3.0
+      }
+    },
+    {
+      "tool": "mcp__naoqi__go",
+      "args": {
+        "bearing_deg": 0,
+        "distance_m": 3.0
+      }
+    },
+    {
+      "tool": "mcp__naoqi__go",
+      "args": {
+        "bearing_deg": 90,
+        "distance_m": 1.0
+      }
+    },
+    {
+      "tool": "mcp__naoqi__rest",
+      "args": {}
+    },
+    {
+      "text": "The robot is resting."
+    }
+  ]
+}

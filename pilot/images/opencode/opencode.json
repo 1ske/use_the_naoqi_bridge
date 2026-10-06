@@ -1,0 +1,58 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "update": "disable",
+  "share": "disabled",
+  "providers": {
+    "openrouter": {
+      "models": {
+        "anthropic/claude-opus-5.5": {
+          "body": { "provider": { "only": ["anthropic"], "allow_fallbacks": false }, "reasoning": { "effort": "medium" } }
+        },
+        "google/gemini-3.8-flash": {
+          "body": { "provider": { "only": ["google-ai-studio"], "allow_fallbacks": false }, "reasoning": { "effort": "medium" } }
+        },
+        "openai/gpt-6.1-sol": {
+          "body": { "provider": { "only": ["openai"], "allow_fallbacks": false }, "reasoning": { "effort": "medium" } }
+        },
+        "qwen/qwen3.8-27b": {
+          "body": { "provider": { "only": ["alibaba"], "allow_fallbacks": false }, "reasoning": { "effort": "medium" } }
+        }
+      }
+    }
+  },
+  "mcp": {
+    "servers": {
+      "naoqi": {
+        "type": "local",
+        "command": ["/opt/naoqi-mcp/.venv/bin/naoqi-mcp"],
+        "codemode": false,
+        "environment": {
+          "NAOQI_BRIDGE_URL": "http://bridge:8765",
+          "NAOQI_PRIMITIVES": "/opt/naoqi-mcp/primitives.json",
+          "NO_PROXY": "bridge,localhost,127.0.0.1",
+          "no_proxy": "bridge,localhost,127.0.0.1"
+        }
+      }
+    }
+  },
+  "permissions": [
+    { "action": "*", "resource": "*", "effect": "deny" },
+    { "action": "naoqi_*", "resource": "*", "effect": "allow" }
+  ],
+  "agents": {
+    "build": {
+      "permissions": [
+        { "action": "*", "resource": "*", "effect": "deny" },
+        { "action": "naoqi_*", "resource": "*", "effect": "allow" }
+      ]
+    }
+  },
+  "experimental": {
+    "policies": [
+      { "action": "provider.use", "resource": "*", "effect": "deny" },
+      { "action": "provider.use", "resource": "openrouter", "effect": "allow" },
+      { "action": "permission", "resource": "*", "effect": "deny" },
+      { "action": "permission", "resource": "naoqi_*", "effect": "allow" }
+    ]
+  }
+}

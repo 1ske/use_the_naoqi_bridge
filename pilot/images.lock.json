@@ -1,0 +1,17 @@
+{
+  "built_at": "2026-10-05T14:38:23+00:00",
+  "built_from_commit": "f696ccd3622e5a4bf42930cd5b6c73e37ce85139",
+  "uncommitted_changes_in_image_sources": true,
+  "images": {
+    "naoqi-pilot/base": "sha256:326a52650d9981f070ed3d488d590e28c89e5963e783ad6a5d8597f1a64d3f65",
+    "naoqi-pilot/claude": "sha256:38d542e169bbbdc3954631bdea7d336736cdc583b49ceb2c1d542079cb8b343d",
+    "naoqi-pilot/opencode": "sha256:b076ba70b613a81ff59d39606e898220a7c7ea44ed314d9207ac697c1c44ce4f",
+    "naoqi-pilot/agy": "sha256:545a060f37eb4cfff3c2c0ea638d793c74f7492e0706ead55e2597df8789590f",
+    "naoqi-pilot/proxy": "sha256:39b5f9154071da789443900b6aba852582e03ea71b62b293498f1d582d935cfb"
+  },
+  "harness_versions": {
+    "claude": "2.1.280",
+    "opencode": "2.0.21",
+    "agy": "1.2.17"
+  }
+}

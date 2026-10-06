@@ -1,0 +1,25 @@
+{
+  "_comment": "Run protocol values from Chapter 5 (evaluation.tex). 'decided': false marks values the chapter still lists as TODO/DECIDE; the runner and the metrics script use them as given here and copy them into every manifest.",
+  "prompts": {
+    "_source": "Table 5.2 (tab:prompts); wording not yet frozen",
+    "decided": false,
+    "corridor": "Use the naoqi MCP server. You control a robot at the start of a corridor. Follow the corridor to its end, which is marked by a green panel, and stop in front of the panel. When the robot is there, call rest.",
+    "corridor_complex": "Use the naoqi MCP server. You control a robot at the start of a corridor with several corners. Follow the corridor to its end, which is marked by a red wall, and stop in front of the wall. When the robot is there, call rest."
+  },
+  "caps": {
+    "_source": "Table 5.3 (tab:end_conditions): start values, set per task from the pilot",
+    "decided": false,
+    "corridor": {"wall_clock_s": 1800, "tool_calls": 100},
+    "corridor_complex": {"wall_clock_s": 1800, "tool_calls": 100}
+  },
+  "grace_period_s": {
+    "_source": "Section 5.1.3 (Normal end): proposed 30 s",
+    "decided": false,
+    "value": 30
+  },
+  "min_real_time_factor": {
+    "_source": "Section 5.1.1 (Simulated tasks): proposed 0.9; below it the run is invalid and repeated",
+    "decided": false,
+    "value": 0.9
+  }
+}

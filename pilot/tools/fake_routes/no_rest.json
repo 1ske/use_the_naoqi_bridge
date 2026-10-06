@@ -1,0 +1,8 @@
+{
+  "_comment": "Fake-LLM script for testing the 'session ended' end condition: the agent stops without calling rest.",
+  "steps": [
+    {"tool": "mcp__naoqi__get_state", "args": {}},
+    {"tool": "mcp__naoqi__stand", "args": {}},
+    {"text": "I have finished."}
+  ]
+}

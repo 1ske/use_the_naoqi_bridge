@@ -1,0 +1,63 @@
+{
+  "_comment": "Fake-LLM script (Claude Code tool names) meant to end a Corridor test run in the success area: east 4.85 m by odometry (about 3.45 m real) to the middle of the turn, turn left, north to the green panel, rest. NOT reached so far: in run corridor-A5-20261006T073321Z-test NAOqi's collision protection stopped the walk north 0.4 m into the last leg (likely the south corner of the west wall); stopping at the east wall instead blocked the turn. A fixed script cannot react to obstacle results; the success side of the check is covered by pilot/supervisor/selftest.py.",
+  "steps": [
+    {
+      "tool": "mcp__naoqi__get_state",
+      "args": {}
+    },
+    {
+      "tool": "mcp__naoqi__stand",
+      "args": {}
+    },
+    {
+      "tool": "mcp__naoqi__go",
+      "args": {
+        "bearing_deg": 0,
+        "distance_m": 3.0
+      }
+    },
+    {
+      "tool": "mcp__naoqi__go",
+      "args": {
+        "bearing_deg": 0,
+        "distance_m": 1.85
+      }
+    },
+    {
+      "tool": "mcp__naoqi__go",
+      "args": {
+        "bearing_deg": 90,
+        "distance_m": 0
+      }
+    },
+    {
+      "tool": "mcp__naoqi__walk_to",
+      "args": {
+        "x": 0.0,
+        "y": -0.25,
+        "theta": 0.0
+      }
+    },
+    {
+      "tool": "mcp__naoqi__go",
+      "args": {
+        "bearing_deg": 0,
+        "distance_m": 3.0
+      }
+    },
+    {
+      "tool": "mcp__naoqi__go",
+      "args": {
+        "bearing_deg": 0,
+        "distance_m": 3.0
+      }
+    },
+    {
+      "tool": "mcp__naoqi__rest",
+      "args": {}
+    },
+    {
+      "text": "The robot is in front of the green panel and resting."
+    }
+  ]
+}

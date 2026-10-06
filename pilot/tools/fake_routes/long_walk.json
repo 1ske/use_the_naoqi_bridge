@@ -1,0 +1,10 @@
+{
+  "_comment": "Fake-LLM script for testing the wall-clock cap (--test-caps wall_clock_s=20) and setup failures (naoqisim stopped during the walk): stand and walk east for a long time, never rest.",
+  "steps": [
+    {"tool": "mcp__naoqi__get_state", "args": {}},
+    {"tool": "mcp__naoqi__stand", "args": {}},
+    {"tool": "mcp__naoqi__go", "args": {"bearing_deg": 0, "distance_m": 3.0}},
+    {"tool": "mcp__naoqi__go", "args": {"bearing_deg": 0, "distance_m": 3.0}},
+    {"text": "I have finished."}
+  ]
+}

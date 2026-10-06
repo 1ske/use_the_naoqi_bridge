@@ -1,0 +1,35 @@
+#!/bin/sh
+# pilot-agent PROMPT MODEL: one headless OpenCode session with openrouter/MODEL; the JSON event stream goes to /out.
+# The OpenRouter key comes from OPENROUTER_API_KEY, which the runner sets for this container only.
+#
+# OpenCode 2 connects MCP servers asynchronously and offers only the tools connected at request time, so a
+# prompt sent right at startup reaches the LLM without the NAO tools or the server's instructions. This script
+# therefore starts OpenCode's server, waits until it reports the naoqi server as connected, and only then
+# submits the prompt (t0). Its title agent is pointed at the run's own model, so that every request of the run
+# goes to the same LLM and provider (by default it picks another, smaller model).
+set -u
+PROMPT=$1 MODEL=$2
+SERVER=http://127.0.0.1:4096
+OPENCODE_PASSWORD=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+OPENCODE_CONFIG_CONTENT=$(MODEL="$MODEL" python3 -c '
+import json, os
+config = json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT") or "{}")
+config.setdefault("agents", {}).setdefault("title", {})["model"] = "openrouter/" + os.environ["MODEL"]
+print(json.dumps(config))')
+export OPENCODE_PASSWORD OPENCODE_CONFIG_CONTENT
+
+opencode serve --hostname 127.0.0.1 --port 4096 >/out/harness-server.log 2>&1 &
+ready=0
+for _ in $(seq 1 120); do
+    case "$(opencode api --server $SERVER mcp.list --param directory=/work 2>/dev/null)" in
+        *'"connected"'*) ready=1; break ;;
+    esac
+    sleep 0.5
+done
+if [ $ready -ne 1 ]; then
+    echo "naoqi MCP server not connected after 60 s" >/out/harness-stderr.log
+    exit 70
+fi
+date +%s.%N >/out/t0
+exec opencode run --server $SERVER --format json --model "openrouter/$MODEL" "$PROMPT" \
+    >/out/transcript.jsonl 2>/out/harness-stderr.log

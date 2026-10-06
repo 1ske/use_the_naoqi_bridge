@@ -1,0 +1,5 @@
+#!/bin/sh
+set -e
+: "${PROXY_ALLOW:?PROXY_ALLOW must list the allowed host regexes}"
+for pattern in $PROXY_ALLOW; do echo "$pattern"; done > /etc/tinyproxy/allow
+exec tinyproxy -d -c /etc/tinyproxy/tinyproxy.conf

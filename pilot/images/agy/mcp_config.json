@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "naoqi": {
+      "command": "/opt/naoqi-mcp/.venv/bin/naoqi-mcp",
+      "args": [],
+      "env": {
+        "NAOQI_BRIDGE_URL": "http://bridge:8765",
+        "NAOQI_PRIMITIVES": "/opt/naoqi-mcp/primitives.json",
+        "NO_PROXY": "bridge,localhost,127.0.0.1",
+        "no_proxy": "bridge,localhost,127.0.0.1"
+      },
+      "tools": {
+        "get_state": { "eager": true },
+        "look": { "eager": true },
+        "look_around": { "eager": true },
+        "stand": { "eager": true },
+        "walk_to": { "eager": true },
+        "go": { "eager": true },
+        "say": { "eager": true },
+        "rest": { "eager": true }
+      }
+    }
+  }
+}

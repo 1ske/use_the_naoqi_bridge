@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": ["mcp__naoqi"]
+  },
+  "env": {
+    "DISABLE_AUTOUPDATER": "1"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "_comment": "Fake-LLM script for testing the tool-call cap (run with --test-caps tool_calls=3): reads only, never rests.",
+  "steps": [
+    {"tool": "mcp__naoqi__get_state", "args": {}},
+    {"tool": "mcp__naoqi__get_state", "args": {}},
+    {"tool": "mcp__naoqi__get_state", "args": {}},
+    {"tool": "mcp__naoqi__get_state", "args": {}},
+    {"tool": "mcp__naoqi__get_state", "args": {}},
+    {"tool": "mcp__naoqi__get_state", "args": {}},
+    {"text": "I have finished."}
+  ]
+}

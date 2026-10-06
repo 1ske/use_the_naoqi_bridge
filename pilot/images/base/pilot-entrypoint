@@ -1,0 +1,12 @@
+#!/bin/sh
+# Runs as root only to install the login the runner staged in /stage (docker cp before start) into the
+# agent's home, then drops to the unprivileged user and runs the harness from the empty /work directory.
+set -e
+if [ -d /stage ]; then
+    cp -a /stage/. /home/agent/
+    rm -rf /stage
+    chown -R agent:agent /home/agent
+fi
+cd /work
+exec setpriv --reuid=agent --regid=agent --init-groups --inh-caps=-all \
+    env HOME=/home/agent USER=agent "$@"

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "naoqi": {
+      "command": "/opt/naoqi-mcp/.venv/bin/naoqi-mcp",
+      "args": [],
+      "env": {
+        "NAOQI_BRIDGE_URL": "http://bridge:8765",
+        "NAOQI_PRIMITIVES": "/opt/naoqi-mcp/primitives.json",
+        "NO_PROXY": "bridge,localhost,127.0.0.1",
+        "no_proxy": "bridge,localhost,127.0.0.1"
+      }
+    }
+  }
+}

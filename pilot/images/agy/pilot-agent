@@ -1,0 +1,7 @@
+#!/bin/sh
+# pilot-agent PROMPT: one headless agy session; the stream-json transcript goes to /out.
+# The login is the template's token file, which the runner stages into this container only.
+# --agent nao: the custom agent in agents/nao/agent.md (no built-in tools; see pilot/config/agents.json).
+date +%s.%N >/out/t0  # prompt submitted: start of the run
+exec agy -p "$1" --agent nao --model gemini-3.8-flash-medium --output-format stream-json \
+    >/out/transcript.jsonl 2>/out/harness-stderr.log
