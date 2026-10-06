@@ -163,7 +163,8 @@ def attempt(agent, check, fake, check_dir):
             (folder / "cost.json").write_text(json.dumps({
                 "source": "OpenRouter /api/v1/key usage of the shared A1-A4 key, after minus before the attempt",
                 "usage_before_usd": usage_before, "usage_after_usd": usage_after,
-                "cost_usd": round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited}, indent=2))
+                "cost_usd": round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited,
+                "cross_check_step_costs_usd": runner.opencode_step_costs(folder / "agent")}, indent=2))
         price = dict(runner.PRICES[runner.PRICED_MODEL[harness]], model=runner.PRICED_MODEL[harness]) \
             if harness in runner.PRICED_MODEL else None
         result["cost_usd"], result["cost_source"] = metrics.harness_cost(harness, folder / "agent", price)

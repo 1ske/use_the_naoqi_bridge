@@ -85,7 +85,7 @@
   },
   "transcript_check": {
     "_comment": "Fixed 2026-10-05, before the pilot. Applied by pilot/transcript_check.py after every run.",
-    "rule": "A call to any tool other than the 8 NAO tools is a protocol violation, and the run counts as a failure. Exception, A6 only: calls to manage_task, list_resources and read_resource are not violations (shown to give no outside information or effect), and neither are calls to view_file on an image agy offloaded from a NAO tool result (view_file_allowed_path); they are counted per run and reported. view_file on any other path is a violation.",
+    "rule": "A call to any tool other than the 8 NAO tools is a protocol violation, and the run counts as a failure. Exception, A6 only: calls to manage_task, list_resources and read_resource are not violations (shown to give no outside information or effect), and neither are calls to view_file on an image agy offloaded from a NAO tool result or on the file in which agy puts the naoqi server's instructions (view_file_allowed_path); they are counted per run and reported. view_file on any other path is a violation.",
     "nao_tools": [
       "get_state",
       "look",
@@ -109,8 +109,8 @@
         "view_file"
       ]
     },
-    "view_file_allowed_path": "^/home/agent/\\.gemini/antigravity-cli/brain/[^/]+/\\.system_generated/steps/[0-9]+/media_[0-9]+\\.[a-z]+$",
-    "rule_changed": "2026-10-06: view_file on offloaded tool-result images exempt for A6 (agy shows tool-result images to the model only through view_file)"
+    "view_file_allowed_path": "^/home/agent/\\.gemini/antigravity-cli/(brain/[^/]+/\\.system_generated/steps/[0-9]+/media_[0-9]+\\.[a-z]+|mcp/naoqi/instructions\\.md)$",
+    "rule_changed": "2026-10-06: view_file on offloaded tool-result images and on agy's copy of the naoqi server's instructions exempt for A6 (agy shows both to the model only through view_file)"
   },
   "deviations": {
     "opencode": [

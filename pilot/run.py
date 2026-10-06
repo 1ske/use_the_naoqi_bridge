@@ -58,7 +58,7 @@ SIM_NAOQI = "host.docker.internal:9559"  # naoqisim's published port; a simulate
 POLL = 0.1
 OPENROUTER_KEY = PILOT_HOME / "templates" / "openrouter" / "api-key"  # shared by A1-A4 (agents.json, cost_sources)
 OPENROUTER_KEY_INFO = "https://openrouter.ai/api/v1/key"
-USAGE_POLL, USAGE_STABLE_READS, USAGE_MAX_WAIT = 10, 3, 300  # s, equal reads in a row, s
+USAGE_FIRST_READ, USAGE_POLL, USAGE_STABLE_READS, USAGE_MAX_WAIT = 120, 10, 3, 420  # s, s, reads in a row, s
 T0_TIMEOUT = 120  # s from container start; OpenCode alone waits up to 60 s for the MCP server
 
 
@@ -226,9 +226,26 @@ def openrouter_usage(key):
         return float(json.loads(response.read())["data"]["usage"])
 
 
+def opencode_step_costs(agent_dir):
+    """Cross-check only: the sum of the per-request costs OpenCode records (step_finish), which leaves out its title
+    request."""
+    total = 0.0
+    for line in (agent_dir / "transcript.jsonl").read_text(errors="replace").splitlines() if \
+            (agent_dir / "transcript.jsonl").exists() else []:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if event.get("type") == "step_finish":
+            total += (event.get("part") or {}).get("cost") or 0
+    return round(total, 8)
+
+
 def settled_usage(key):
-    """The key's usage once it has stopped changing (OpenRouter updates it a little after the last request)."""
+    """The key's usage once it has stopped changing. OpenRouter updates it up to a minute or more after the last
+    request, and it can stay unchanged meanwhile, so the first read is only USAGE_FIRST_READ s after the run."""
     started, reads = time.time(), []
+    time.sleep(USAGE_FIRST_READ - USAGE_POLL)
     while time.time() - started < USAGE_MAX_WAIT:
         time.sleep(USAGE_POLL)
         reads.append(openrouter_usage(key))
@@ -360,7 +377,8 @@ def run(agent, task, position=None, fake_script=None, test_caps=None):
             (run_dir / "cost.json").write_text(json.dumps({
                 "source": "OpenRouter /api/v1/key usage of the shared A1-A4 key, after minus before the run",
                 "usage_before_usd": usage_before, "usage_after_usd": usage_after,
-                "cost_usd": round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited}, indent=2))
+                "cost_usd": round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited,
+                "cross_check_step_costs_usd": opencode_step_costs(run_dir / "agent")}, indent=2))
         check = transcript_check.check(agent, run_dir / "agent")
         (run_dir / "transcript_check.json").write_text(json.dumps(check, indent=2))
         if not check["transcript_found"] and not invalid:
