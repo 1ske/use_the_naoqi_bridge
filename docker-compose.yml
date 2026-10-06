@@ -21,7 +21,13 @@ services:
     command: python bridge.py
     ports:
       - "127.0.0.1:8765:8765"
+    volumes:
+      - ./src:/app
+      # Evaluation instrumentation (per-run call log): only the bridge mounts this directory, and it writes
+      # there only while the runner has put a run ID in it.
+      - ${HOME}/.naoqi-pilot/instrumentation:/instrumentation
     environment:
+      BRIDGE_RUN_DIR: /instrumentation
       NAO_IP: ${NAO_IP:-host.docker.internal}
       BRIDGE_CLIENT_TIMEOUT: ${BRIDGE_CLIENT_TIMEOUT:-20}  # rest if awake and no client request for this long
       BRIDGE_AUTO_IMAGE: ${BRIDGE_AUTO_IMAGE:-1}  # 1: every result carries one image (top above bottom camera), 0: only look/look_around/scan

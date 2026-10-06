@@ -102,6 +102,66 @@ def log(message):
     sys.stdout.flush()
 
 
+class CallLog(object):
+    """Per-run record of tool calls and falls, for the evaluation's instrumentation (off by default).
+
+    Active only when BRIDGE_RUN_DIR is set (a host directory that only the bridge container mounts) and
+    holds a file `run_id` written by the runner; without a run ID nothing is written anywhere. Each tool
+    call becomes one line of <dir>/<run_id>/calls.jsonl: times received and returned, tool, arguments as
+    received, and the result (without image pixels) or the error type. Falls get their own lines. The
+    run's first `rest` also creates <dir>/<run_id>/rest_received as soon as it arrives, before the robot
+    stops or crouches, so the simulator's ground-truth supervisor can take the pose at that moment."""
+
+    OUTCOMES = {400: "rejected", 404: "rejected", 409: "refused", 502: "naoqi_error", 503: "unreachable"}
+
+    def __init__(self, directory):
+        self.directory = directory
+        self.lock = threading.Lock()
+
+    def run(self):
+        if not self.directory:
+            return None
+        try:
+            with open(os.path.join(self.directory, "run_id")) as f:
+                run_id = f.read().strip()
+        except IOError:
+            return None
+        return run_id if run_id and all(c.isalnum() or c in "-_." for c in run_id) else None
+
+    def _path(self, run_id, name):
+        folder = os.path.join(self.directory, run_id)
+        if not os.path.isdir(folder):
+            os.makedirs(folder)
+        return os.path.join(folder, name)
+
+    def rest_received(self, run_id, received):
+        if run_id:
+            try:
+                fd = os.open(self._path(run_id, "rest_received"), os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+                os.write(fd, "%.6f\n" % received)
+                os.close(fd)
+            except OSError:
+                pass  # not the run's first rest
+
+    def write(self, run_id, record):
+        if not run_id:
+            return
+        line = json.dumps(record, sort_keys=True) + "\n"
+        with self.lock:
+            with open(self._path(run_id, "calls.jsonl"), "a") as f:
+                f.write(line)
+
+    @staticmethod
+    def without_pixels(result):
+        strip = lambda frame: dict((k, v) for k, v in frame.items() if k != "data")
+        result = dict(result)
+        if "image" in result:
+            result["image"] = strip(result["image"])
+        if "images" in result:
+            result["images"] = [strip(frame) for frame in result["images"]]
+        return result
+
+
 class Refused(Exception):
     """A safety rule refused the command (HTTP 409)."""
 
@@ -1011,6 +1071,7 @@ class Handler(BaseHTTPRequestHandler):
         log("%s %s" % (self.address_string(), fmt % args))
 
     def reply(self, status, body):
+        self.sent = (status, body)
         data = json.dumps(body)
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -1036,7 +1097,31 @@ class Handler(BaseHTTPRequestHandler):
         lease.touch()
         if self.path == "/heartbeat":
             return self.reply(200, {"ok": True})
+        received = time.time()
+        run_id = call_log.run()
         name = self.path[len("/call/"):] if self.path.startswith("/call/") else None
+        if name == "rest":
+            call_log.rest_received(run_id, received)  # first thing, before the robot stops or crouches
+        self.sent = self.arguments = None
+        try:
+            self.call_primitive(name)
+        finally:
+            if run_id:
+                self.log_call(run_id, name, received)
+
+    def log_call(self, run_id, name, received):
+        status, body = self.sent or (None, None)
+        record = {"type": "call", "run_id": run_id, "tool": name, "arguments": self.arguments,
+                  "received": received, "returned": time.time()}
+        if status == 200:
+            record["outcome"] = "ok"
+            record["result"] = CallLog.without_pixels(body["result"])
+        else:
+            record["outcome"] = CallLog.OUTCOMES.get(status, "bridge_error")  # no reply: the handler crashed
+            record["error"] = body.get("error") if body else None
+        call_log.write(run_id, record)
+
+    def call_primitive(self, name):
         entry = self.server.registry.get(name)
         if entry is None:
             return self.reply(404, {"ok": False, "error": "unknown primitive %r (known: %s)"
@@ -1047,10 +1132,12 @@ class Handler(BaseHTTPRequestHandler):
             if length > 65536:
                 raise BadArgs("request too large")
             raw = self.rfile.read(length) if length else "{}"
+            self.arguments = raw  # as received; replaced by the parsed object when it is valid JSON
             try:
                 args = json.loads(raw or "{}", parse_constant=reject_constant)
             except ValueError as e:
                 raise BadArgs("body is not valid JSON: %s" % e)
+            self.arguments = args
             args = validate(entry["params"], args)
             try:
                 p = self.server.robot.get()
@@ -1131,6 +1218,8 @@ def monitor(args, shutting_down):
             last_stamp = stamp
             if fall and not guard.fallen:
                 guard.note(fall)
+                run_id = call_log.run()
+                call_log.write(run_id, {"type": "fall", "run_id": run_id, "time": time.time(), "cause": fall})
                 movement.interrupt(p, "fell")
             if lease.expired():
                 lease.fired = True
@@ -1158,8 +1247,11 @@ def monitor(args, shutting_down):
         time.sleep(MONITOR_PERIOD)
 
 
+call_log = CallLog(None)
+
+
 def main():
-    global lease, camera, move_config
+    global lease, camera, move_config, call_log
 
     def extra(parser):
         parser.add_argument("--listen", default="0.0.0.0")
@@ -1178,6 +1270,7 @@ def main():
                             help="gait step length (m); NAOqi's default is 0.04, its maximum 0.08")
 
     args = parse_args(__doc__, extra)
+    call_log = CallLog(os.environ.get("BRIDGE_RUN_DIR") or None)
     lease = Lease(args.client_timeout)
     camera = Camera(args)
     move_config = [["MaxStepX", min(0.08, max(0.02, args.max_step_x))]]
