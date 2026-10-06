@@ -38,13 +38,14 @@ def image_id(image):
 
 class AgentContainer:
     def __init__(self, run_id, agent, out_dir, bridge_container=None, openrouter_key=None, test_env=None,
-                 proxy_allow=None):
+                 proxy_allow=None, image=None):
         """test_env / proxy_allow: only for free test runs against pilot/tools/fake_llm.py. test_env replaces the
         login and points the harness at the fake endpoint (NO_PROXY there is added to the default); proxy_allow
         replaces the agent's allowlist, so that nothing outside the run's network is reachable."""
         self.run_id, self.agent, self.spec = run_id, agent, AGENTS[agent]
         self.test_env = dict(test_env or {})
         self.proxy_allow = proxy_allow or self.spec["proxy_allow"]
+        self.image = image or self.spec["image"]  # another image only for the instruction and image check
         self.out_dir = Path(out_dir).resolve()
         self.bridge = bridge_container
         self.openrouter_key = openrouter_key
@@ -92,7 +93,7 @@ class AgentContainer:
                 raise ValueError("%s needs the run's OpenRouter key" % self.agent)
             env["OPENROUTER_API_KEY"] = self.openrouter_key
             args += ["-e", "OPENROUTER_API_KEY"]
-        args += [self.spec["image"], "pilot-agent", prompt]
+        args += [self.image, "pilot-agent", prompt]
         if harness == "opencode":
             args.append(self.spec["model"])
         docker(*args, env=env)

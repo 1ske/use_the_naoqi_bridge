@@ -35,18 +35,29 @@ claude_id=$(build claude "$STAGE/claude" --build-arg "BASE=$base_ref")
 opencode_id=$(build opencode "$STAGE/opencode" --build-arg "BASE=$base_ref")
 agy_id=$(build agy "$STAGE/agy" --build-arg "BASE=$base_ref")
 proxy_id=$(build proxy "$STAGE/proxy")
+# Verification builds (instruction and image check): each harness image plus pilot/verify/naoqi_mcp_verify.py.
+for name in claude opencode agy; do
+    mkdir -p "$STAGE/$name-verify"
+    cp "$REPO/pilot/images/verify/Dockerfile" "$REPO/pilot/verify/naoqi_mcp_verify.py" "$STAGE/$name-verify/"
+done
+harness_ref() { local id; id=$(docker image inspect --format '{{.Id}}' "naoqi-pilot/$1"); docker tag "$id" "naoqi-pilot/$1:${id#sha256:}"; echo "naoqi-pilot/$1:${id#sha256:}"; }
+claude_verify_id=$(build claude-verify "$STAGE/claude-verify" --build-arg "HARNESS_IMAGE=$(harness_ref claude)")
+opencode_verify_id=$(build opencode-verify "$STAGE/opencode-verify" --build-arg "HARNESS_IMAGE=$(harness_ref opencode)")
+agy_verify_id=$(build agy-verify "$STAGE/agy-verify" --build-arg "HARNESS_IMAGE=$(harness_ref agy)")
 
 commit=$(git -C "$REPO" rev-parse HEAD)
-dirty=$(git -C "$REPO" status --porcelain -- mcp_server src/primitives.json pilot/images | wc -l | tr -d ' ')
-python3 - "$LOCK" "$commit" "$dirty" "$base_id" "$claude_id" "$opencode_id" "$agy_id" "$proxy_id" <<'EOF'
+dirty=$(git -C "$REPO" status --porcelain -- mcp_server src/primitives.json pilot/images pilot/verify | wc -l | tr -d ' ')
+python3 - "$LOCK" "$commit" "$dirty" "$base_id" "$claude_id" "$opencode_id" "$agy_id" "$proxy_id" \
+    "$claude_verify_id" "$opencode_verify_id" "$agy_verify_id" <<'EOF'
 import json, sys, datetime
-lock, commit, dirty, base, claude, opencode, agy, proxy = sys.argv[1:]
+lock, commit, dirty, base, claude, opencode, agy, proxy, claude_v, opencode_v, agy_v = sys.argv[1:]
 json.dump({
     "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
     "built_from_commit": commit,
     "uncommitted_changes_in_image_sources": int(dirty) > 0,
     "images": {"naoqi-pilot/base": base, "naoqi-pilot/claude": claude, "naoqi-pilot/opencode": opencode,
-               "naoqi-pilot/agy": agy, "naoqi-pilot/proxy": proxy},
+               "naoqi-pilot/agy": agy, "naoqi-pilot/proxy": proxy, "naoqi-pilot/claude-verify": claude_v,
+               "naoqi-pilot/opencode-verify": opencode_v, "naoqi-pilot/agy-verify": agy_v},
     "harness_versions": {"claude": "2.1.280", "opencode": "2.0.21", "agy": "1.2.17"},
 }, open(lock, "w"), indent=2)
 print(open(lock).read())

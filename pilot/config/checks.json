@@ -1,0 +1,9 @@
+{
+  "_comment": "Instruction and image check (section 5.1.5), run by pilot/verify.py with each agent's verification build, three times per agent before the pilot and after the last run. 'decided': false marks wording not yet frozen.",
+  "attempts": 3,
+  "decided": false,
+  "prompts": {
+    "instructions": "Use the naoqi MCP server. Its instructions contain a verification word. Reply with only that word. Do not call any tool.",
+    "image": "Use the naoqi MCP server. Call get_state once. The image in its result shows a code of six digits. Reply with only that code."
+  }
+}
