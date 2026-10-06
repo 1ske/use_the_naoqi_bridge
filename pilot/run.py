@@ -368,7 +368,7 @@ def run(agent, task, position=None, fake_script=None, test_caps=None):
                 wait_for("the real-time factor", lambda: json.loads(gt.read_text())["real_time_factor"] is not None, 5)
             except RuntimeError:
                 log("WARNING: the supervisor saved no real-time factor")
-        for name in ("calls.jsonl", "ground_truth.json"):
+        for name in ("calls.jsonl", "ground_truth.json", "trajectory.jsonl"):
             if (instrumentation / name).exists():
                 shutil.copy(instrumentation / name, run_dir / name)
         if container.openrouter_key:

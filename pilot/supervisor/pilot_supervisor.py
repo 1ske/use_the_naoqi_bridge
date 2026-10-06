@@ -10,7 +10,11 @@ It records only what section 5.1 asks for, into <instrumentation>/<run_id>/groun
     the step it appears. (The bridge's own timestamps come from the Docker VM's clock, which was measured to
     wander up to about 1 s from the Mac's, so a later lookup by time would not be precise enough.)
   * real_time_factor: simulated time / Mac wall-clock time between the runner's <run_id>/t0 and <run_id>/end
-    signals (the moment the prompt was submitted, and the end of the run).
+    signals (the moment the prompt was submitted, and the end of the run), and both marks (t0_mark, end_mark: the
+    simulated and Mac time at which the supervisor saw them).
+  * trajectory.jsonl (added 2026-10-06, beyond section 5.1): the torso's position, heading and tilt every
+    SAMPLE_PERIOD s of simulated time from the start of the run until its end, for path plots and for checking
+    falls against the bridge's log.
 The current run is the one named in <instrumentation>/run_id (written by the runner). The record is saved as soon
 as a run starts, with the open world and whether Webots runs in real-time mode, which the runner checks before t0.
 When the runner removes run_id at the end of the run, the supervisor keeps watching that run's folder for `end`.
@@ -24,6 +28,7 @@ from pathlib import Path
 INSTRUMENTATION = Path(os.environ.get("PILOT_INSTRUMENTATION_DIR", Path.home() / ".naoqi-pilot" / "instrumentation"))
 CONFIG = json.loads((Path(__file__).resolve().parents[1] / "config" / "worlds.json").read_text())
 MAX_TILT_DEG = CONFIG["upright"]["max_tilt_deg"]
+SAMPLE_PERIOD = 0.2  # s of simulated time between trajectory samples
 
 
 class GroundTruth:
@@ -34,6 +39,8 @@ class GroundTruth:
         self.run_id = None
         self.record = {}
         self.marks = {}
+        self.trajectory = None
+        self.next_sample = 0.0
 
     def current_run(self):
         try:
@@ -48,6 +55,28 @@ class GroundTruth:
         up_z = self.nao.getOrientation()[8]  # z component of the torso's z axis (row-major 3x3)
         return [x, y, z], math.degrees(math.acos(max(-1.0, min(1.0, up_z))))
 
+    def heading(self):
+        """Direction of the torso's x axis (forward) in the floor plane, deg counter-clockwise from world x."""
+        r = self.nao.getOrientation()
+        return math.degrees(math.atan2(r[3], r[0]))
+
+    def sample(self):
+        t = self.supervisor.getTime()
+        if self.trajectory is None or t < self.next_sample:
+            return
+        self.next_sample = t + SAMPLE_PERIOD
+        position, tilt = self.torso()
+        self.trajectory.write(json.dumps({"sim_t": round(t, 3), "mac_t": round(time.time(), 3),
+                                          "x": round(position[0], 4), "y": round(position[1], 4),
+                                          "z": round(position[2], 4), "heading_deg": round(self.heading(), 1),
+                                          "tilt_deg": round(tilt, 2)}) + "\n")
+        self.trajectory.flush()
+
+    def stop_trajectory(self):
+        if self.trajectory is not None:
+            self.trajectory.close()
+            self.trajectory = None
+
     def save(self):
         folder = self.directory / self.run_id
         folder.mkdir(parents=True, exist_ok=True)
@@ -59,7 +88,11 @@ class GroundTruth:
         """Call once per simulation step."""
         run_id = self.current_run()
         if run_id and run_id != self.run_id:  # a new run: start from scratch
+            self.stop_trajectory()
             self.run_id, self.marks = run_id, {}
+            folder = self.directory / run_id
+            folder.mkdir(parents=True, exist_ok=True)
+            self.trajectory, self.next_sample = open(folder / "trajectory.jsonl", "w"), 0.0
             self.record = {"run_id": run_id, "world": Path(self.supervisor.getWorldPath()).name,
                            "real_time_mode": self.supervisor.simulationGetMode() == self.supervisor.SIMULATION_MODE_REAL_TIME,
                            "rest": None, "real_time_factor": None}
@@ -73,12 +106,16 @@ class GroundTruth:
             self.record["rest"] = {"torso": [round(v, 4) for v in position], "tilt_deg": round(tilt, 2),
                                    "upright": tilt <= MAX_TILT_DEG}
             self.save()
+        self.sample()
         if "t0" not in self.marks and (folder / "t0").exists():
             self.marks["t0"] = (self.supervisor.getTime(), time.time())
+            self.record["t0_mark"] = {"sim_time": round(self.marks["t0"][0], 3), "mac_time": round(self.marks["t0"][1], 3)}
         if "t0" in self.marks and self.record["real_time_factor"] is None and (folder / "end").exists():
             sim0, wall0 = self.marks["t0"]
             sim1, wall1 = self.supervisor.getTime(), time.time()
             self.record["real_time_factor"] = round((sim1 - sim0) / (wall1 - wall0), 4) if wall1 > wall0 else None
+            self.record["end_mark"] = {"sim_time": round(sim1, 3), "mac_time": round(wall1, 3)}
+            self.stop_trajectory()
             self.save()
 
 
