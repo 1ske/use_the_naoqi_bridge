@@ -21,7 +21,8 @@ Per run:
   * distance_to_goal_m (an addition beyond Table 5.4, approved 2026-10-06): the torso's distance to the goal surface
     at the moment rest arrived, from the same ground truth; None if the run did not end with rest or the torso was
     not in the last leg or the corner before it (pilot/success.py, distance_to_goal).
-  * valid / invalid_reasons: the runner's reason, if any, and a real-time factor below the minimum (protocol.json).
+  * valid / invalid_reasons: the runner's reason, if any, a harness that ended with an error before its first model
+    turn (agy, Claude Code; OpenCode not handled yet), and a real-time factor below the minimum (protocol.json).
 Aggregation over runs (success rates, medians over successful runs) is not done here.
 """
 import json
@@ -120,6 +121,21 @@ def read_jsonl_lenient(path):
     return records
 
 
+def startup_error(harness, agent_dir):
+    """The harness's error if it ended with an error before its first model turn (login, eligibility, provider):
+    a failure outside the agent, so the run is invalid (section 5.1.3). None otherwise or when not handled."""
+    events = read_jsonl_lenient(agent_dir / "transcript.jsonl")
+    if harness == "agy":
+        results = [e["result"] for e in events if e.get("event") == "result"]
+        if results and results[-1].get("status") == "ERROR" and not results[-1].get("num_turns"):
+            return results[-1].get("error") or "agy ended with an error"
+    elif harness == "claude-code":
+        results = [e for e in events if e.get("type") == "result"]
+        if results and results[-1].get("is_error") and not any(e.get("type") == "assistant" for e in events):
+            return results[-1].get("result") or results[-1].get("subtype") or "Claude Code ended with an error"
+    return None
+
+
 def metrics(run_dir):
     run_dir = Path(run_dir)
     manifest = json.loads((run_dir / "manifest.json").read_text())
@@ -150,6 +166,9 @@ def metrics(run_dir):
     succeeded = bool(verdict and verdict["success"]) and not check["protocol_violation"]
 
     invalid = [manifest["invalid_reason"]] if manifest.get("invalid_reason") else []
+    error = startup_error(manifest["agent_config"]["harness"], run_dir / "agent")
+    if error:
+        invalid.append("the harness ended with an error before its first model turn: %s" % error)
     rtf, rtf_min = ground_truth.get("real_time_factor"), PROTOCOL["min_real_time_factor"]["value"]
     if rtf is None:
         invalid.append("no real-time factor recorded")

@@ -69,7 +69,8 @@
     "reasoning": "model gemini-3.8-flash-medium (agy encodes the effort in the model name)",
     "proxy_allow": [
       "^daily-cloudcode-pa\\.googleapis\\.com$",
-      "^oauth2\\.googleapis\\.com$"
+      "^oauth2\\.googleapis\\.com$",
+      "^www\\.googleapis\\.com$"
     ],
     "deviations_ref": "agy",
     "cost_known_missing": "The title request agy sends to gemini-3.1-flash-lite-preview in every run is not in agy's token counts, so it is not in the cost."
@@ -161,8 +162,8 @@
         "what": "Permission rules deny command, unsandboxed, read_file, write_file, read_url, execute_url; mcp(naoqi/*) allowed; /work trusted"
       },
       {
-        "what": "Network: only daily-cloudcode-pa.googleapis.com and oauth2.googleapis.com reachable; feature flags (antigravity-unleash.goog), logging (play.googleapis.com), www.googleapis.com and the update server blocked",
-        "approved": "2026-10-05"
+        "what": "Network: only daily-cloudcode-pa.googleapis.com, oauth2.googleapis.com and www.googleapis.com reachable; feature flags (antigravity-unleash.goog), logging (play.googleapis.com) and the update server blocked. www.googleapis.com is needed for agy's eligibility check (/oauth2/v2/userinfo) before every prompt; the proxy filters by host, so the host's other Google APIs are reachable for agy too (not for the agent, which has only the NAO tools)",
+        "approved": "2026-10-05; www.googleapis.com allowed 2026-10-06"
       }
     ]
   }
