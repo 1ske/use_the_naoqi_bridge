@@ -165,11 +165,15 @@ def metrics(run_dir):
 
     ground_truth_file = run_dir / "ground_truth.json"
     ground_truth = json.loads(ground_truth_file.read_text()) if ground_truth_file.exists() else {}
-    check = json.loads((run_dir / "transcript_check.json").read_text())
+    check_file = run_dir / "transcript_check.json"  # missing when the runner was stopped before collecting
+    check = json.loads(check_file.read_text()) if check_file.exists() else {"protocol_violation": False,
+                                                                             "transcript_found": False}
     verdict = success.verdict(manifest["task_key"], ground_truth) if normal_end else None
     succeeded = bool(verdict and verdict["success"]) and not check["protocol_violation"]
 
     invalid = [manifest["invalid_reason"]] if manifest.get("invalid_reason") else []
+    if not check_file.exists() and not invalid:
+        invalid.append("no transcript check: the run was not collected")
     error = startup_error(manifest["agent_config"]["harness"], run_dir / "agent")
     if error:
         invalid.append("the harness ended with an error before its first model turn: %s" % error)
