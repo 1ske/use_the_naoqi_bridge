@@ -34,6 +34,7 @@ sys.path.insert(0, str(REPO / "pilot"))
 import success  # noqa: E402
 
 PROTOCOL = json.loads((REPO / "pilot" / "config" / "protocol.json").read_text())
+EXCLUDED = json.loads((REPO / "pilot" / "config" / "run_exclusions.json").read_text())["runs"]
 
 
 def read_jsonl(path):
@@ -103,8 +104,11 @@ def harness_rejected(harness, agent_dir):
                     calls[-1] = (calls[-1][0], True)
     else:
         return None
+    prefix = {"opencode": "naoqi_", "claude-code": "mcp__naoqi__", "agy": "mcp_naoqi_"}[harness]
     rejected = 0
     for tool, was_rejected in calls:
+        if not (tool or "").startswith(prefix):
+            continue  # only NAO tool calls count; other calls are the transcript check's
         rejected += was_rejected
         if tool and tool.endswith("rest") and not was_rejected:
             break
@@ -181,6 +185,7 @@ def metrics(run_dir):
     return {
         "run_id": manifest["run_id"], "agent": manifest["agent"], "task": manifest["task"],
         "test_run": bool(manifest.get("test")),
+        "excluded": EXCLUDED.get(manifest["run_id"]),  # a reason when the run is not pilot or main-run data
         "valid": not invalid, "invalid_reasons": invalid,
         "end_condition": manifest["end_condition"],
         "task_success": int(succeeded),

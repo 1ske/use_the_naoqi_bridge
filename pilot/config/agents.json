@@ -85,7 +85,7 @@
   },
   "transcript_check": {
     "_comment": "Fixed 2026-10-05, before the pilot. Applied by pilot/transcript_check.py after every run.",
-    "rule": "A call to any tool other than the 8 NAO tools is a protocol violation, and the run counts as a failure. Exception, A6 only: calls to manage_task, list_resources and read_resource are not violations (shown to give no outside information or effect); they are counted per run and reported.",
+    "rule": "A call to any tool other than the 8 NAO tools is a protocol violation, and the run counts as a failure. Exception, A6 only: calls to manage_task, list_resources and read_resource are not violations (shown to give no outside information or effect), and neither are calls to view_file on an image agy offloaded from a NAO tool result (view_file_allowed_path); they are counted per run and reported. view_file on any other path is a violation.",
     "nao_tools": [
       "get_state",
       "look",
@@ -105,9 +105,12 @@
       "A6": [
         "manage_task",
         "list_resources",
-        "read_resource"
+        "read_resource",
+        "view_file"
       ]
-    }
+    },
+    "view_file_allowed_path": "^/home/agent/\\.gemini/antigravity-cli/brain/[^/]+/\\.system_generated/steps/[0-9]+/media_[0-9]+\\.[a-z]+$",
+    "rule_changed": "2026-10-06: view_file on offloaded tool-result images exempt for A6 (agy shows tool-result images to the model only through view_file)"
   },
   "deviations": {
     "opencode": [
@@ -156,11 +159,12 @@
         "approved": "2026-10-05"
       },
       {
-        "what": "Custom agent 'nao' (agents/nao/agent.md, started with --agent nao): tools: [] and inheritMcp: true, so no built-in tools except manage_task, list_resources and read_resource, which agy cannot remove; its '# identity' section copies agy's default identity text verbatim, so the system prompt equals agy's default except the sections for the removed tools (skills, subagents, conversation transcript, slash commands) and one messaging line",
-        "approved": "2026-10-05"
+        "what": "Custom agent 'nao' (agents/nao/agent.md, started with --agent nao): tools: [view_file] and inheritMcp: true, so no built-in tools except view_file (agy shows a tool result's image to the model only when the model opens the offloaded file with it) and manage_task, list_resources and read_resource, which agy cannot remove; its '# identity' section copies agy's default identity text verbatim, so the system prompt equals agy's default except the sections for the removed tools (skills, subagents, conversation transcript, slash commands) and one messaging line",
+        "approved": "2026-10-05; view_file added 2026-10-06"
       },
       {
-        "what": "Permission rules deny command, unsandboxed, read_file, write_file, read_url, execute_url; mcp(naoqi/*) allowed; /work trusted"
+        "what": "Permission rules deny command, unsandboxed, write_file, read_url, execute_url; read_file allowed only under ~/.gemini/antigravity-cli/brain/ (agy's offloaded tool-result images; a general read_file deny would override the allow); any other read is auto-denied in headless mode, which ends the session; mcp(naoqi/*) allowed; /work trusted",
+        "approved": "2026-10-06"
       },
       {
         "what": "Network: only daily-cloudcode-pa.googleapis.com, oauth2.googleapis.com, www.googleapis.com and lh3.googleusercontent.com reachable; feature flags (antigravity-unleash.goog), logging (play.googleapis.com) and the update server blocked. agy's eligibility check before every prompt needs www.googleapis.com (/oauth2/v2/userinfo) and lh3.googleusercontent.com (the account's profile picture); found with pilot/tools/agy_hosts_check.sh. The proxy filters by host, so these hosts' other Google services are reachable for agy too (not for the agent, which has only the NAO tools)",

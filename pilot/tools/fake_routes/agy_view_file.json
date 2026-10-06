@@ -1,0 +1,44 @@
+{
+  "_comment": "Fake-LLM script (agy) testing view_file: an offloaded image (must work and reach the model), the MCP server's primitives.json and /etc/hostname (both must be refused). agy's built-in tools also require a toolAction argument.",
+  "steps": [
+    {
+      "tool": "mcp_naoqi_get_state",
+      "args": {
+        "toolSummary": "Robot state check"
+      }
+    },
+    {
+      "tool": "view_file",
+      "args": {
+        "AbsolutePath": "$OFFLOADED",
+        "toolSummary": "Camera image view",
+        "toolAction": "View file"
+      }
+    },
+    {
+      "tool": "view_file",
+      "args": {
+        "AbsolutePath": "/opt/naoqi-mcp/primitives.json",
+        "toolSummary": "File view",
+        "toolAction": "View file"
+      }
+    },
+    {
+      "tool": "view_file",
+      "args": {
+        "AbsolutePath": "/etc/hostname",
+        "toolSummary": "File view",
+        "toolAction": "View file"
+      }
+    },
+    {
+      "tool": "mcp_naoqi_rest",
+      "args": {
+        "toolSummary": "Robot rest"
+      }
+    },
+    {
+      "text": "Done."
+    }
+  ]
+}

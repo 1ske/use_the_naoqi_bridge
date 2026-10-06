@@ -1,7 +1,8 @@
 """Transcript check, applied after every run (rule fixed 2026-10-05, in pilot/config/agents.json).
 
 A call to any tool other than the 8 NAO tools is a protocol violation, and the run counts as a failure.
-Exception, A6 only: manage_task, list_resources and read_resource are not violations; they are counted.
+Exception, A6 only: manage_task, list_resources and read_resource, and view_file on an image agy offloaded from a
+tool result, are not violations; they are counted (rule changed 2026-10-06, see agents.json).
 Every call the transcript records counts, also one that the harness refused or that failed.
 
 Sources: Claude Code's and OpenCode's JSON transcripts (transcript.jsonl). For agy, its own conversation logs
@@ -12,11 +13,13 @@ Every model turn there lists the tool calls the model made, including ones agy t
     python3 pilot/transcript_check.py AGENT RUN_DIR     -> JSON summary on stdout
 """
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
 
 CONFIG = Path(__file__).resolve().parent / "config" / "agents.json"
+VIEW_FILE_ALLOWED = json.loads(CONFIG.read_text())["transcript_check"]["view_file_allowed_path"]
 
 
 def tool_calls(harness, lines):
@@ -39,10 +42,14 @@ def tool_calls(harness, lines):
                     seen.add(key)
                     yield part.get("tool")
         elif harness == "agy":
-            # agy's conversation log: each model turn (PLANNER_RESPONSE) lists the tool calls it made.
+            # agy's conversation log: each model turn (PLANNER_RESPONSE) lists the tool calls it made. view_file is
+            # exempt only on an image agy offloaded from a tool result; on any other path it counts as its own name.
             if event.get("type") == "PLANNER_RESPONSE":
                 for call in event.get("tool_calls") or []:
-                    yield call.get("name")
+                    name, path = call.get("name"), str((call.get("args") or {}).get("AbsolutePath", ""))
+                    if name == "view_file" and not re.match(VIEW_FILE_ALLOWED, path):
+                        name = "view_file(%s)" % path
+                    yield name
         else:
             raise ValueError("unknown harness %r" % harness)
 

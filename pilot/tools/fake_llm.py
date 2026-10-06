@@ -5,7 +5,8 @@ Speaks three APIs, streaming or not:
   Anthropic   POST /v1/messages                                                 (Claude Code with ANTHROPIC_BASE_URL)
   OpenAI      POST .../chat/completions                                         (OpenCode's OpenRouter provider)
 
-Every request is recorded to /cap/requests.jsonl. A request that offers tools is a "main" request and gets the
+Every request is recorded to /cap/requests.jsonl. In a step's args, the string "$OFFLOADED" is replaced by the path of
+the last image agy offloaded to a file ("[Resource offloaded to file://PATH]" in the request). A request that offers tools is a "main" request and gets the
 next step of /cap/script.json: {"steps": [{"tool": NAME, "args": {...}} | {"text": "..."}]}; after the last step
 it answers with text. A request without tools (title or other side request) gets the text "Side reply".
 Usage is distinctive so that a harness's reported totals show which responses it counted:
@@ -13,6 +14,7 @@ Usage is distinctive so that a harness's reported totals show which responses it
 Gemini responses also report a tenth of the input as cached (cachedContentTokenCount, included in the input).
 """
 import json
+import re
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -25,6 +27,15 @@ def script():
         return json.load(open("/cap/script.json"))["steps"]
     except (OSError, ValueError, KeyError):
         return []
+
+
+def with_offloaded(step, raw):
+    """Replace "$OFFLOADED" in a tool step's args by the last offloaded image path in the request."""
+    if "tool" not in step or "$OFFLOADED" not in json.dumps(step.get("args", {})):
+        return step
+    paths = re.findall(r"Resource offloaded to file://([^\]\\\"]+)", raw)
+    path = paths[-1] if paths else "/no-offloaded-image"
+    return dict(step, args=json.loads(json.dumps(step["args"]).replace("$OFFLOADED", path)))
 
 
 def next_action(has_tools):
@@ -59,6 +70,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             api, has_tools = "other", False
         action, usage, label = next_action(has_tools) if api != "other" else ({}, {}, "other")
+        action = with_offloaded(action, raw.decode("utf-8", "replace"))
         headers = {k: ("<redacted>" if k.lower() in SECRET_HEADERS else v) for k, v in self.headers.items()}
         with open("/cap/requests.jsonl", "a") as f:
             f.write(json.dumps({"t": time.time(), "label": label, "api": api, "path": path, "headers": headers,

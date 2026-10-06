@@ -3,14 +3,16 @@
     "deny": [
       "command(*)",
       "unsandboxed(*)",
-      "read_file(*)",
       "write_file(*)",
       "read_url(*)",
       "execute_url(*)"
     ],
     "allow": [
-      "mcp(naoqi/*)"
+      "mcp(naoqi/*)",
+      "read_file(/home/agent/.gemini/antigravity-cli/brain/**)"
     ]
   },
-  "trustedWorkspaces": ["/work"]
+  "trustedWorkspaces": [
+    "/work"
+  ]
 }
