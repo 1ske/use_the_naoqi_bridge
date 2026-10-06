@@ -117,7 +117,8 @@ def run_record(run_dir, out):
         answer = ""
     return {
         "run_id": manifest["run_id"], "agent": manifest["agent"], "task_key": manifest["task_key"],
-        "harness": harness, "test": bool(manifest.get("test")) or manifest["run_id"].endswith("-test"), "manifest": manifest, "metrics": m,
+        "harness": harness, "test": bool(manifest.get("test")) or manifest["run_id"].endswith("-test"),
+        "manifest": manifest, "metrics": m,
         "calls": calls, "falls": falls, "trajectory": trajectory, "ground_truth": ground_truth,
         "transcript_check": json.loads(check_file.read_text()) if check_file.exists() else None,
         "cost": json.loads((run_dir / "cost.json").read_text()) if (run_dir / "cost.json").exists() else None,
