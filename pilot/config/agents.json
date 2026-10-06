@@ -70,7 +70,8 @@
     "proxy_allow": [
       "^daily-cloudcode-pa\\.googleapis\\.com$",
       "^oauth2\\.googleapis\\.com$",
-      "^www\\.googleapis\\.com$"
+      "^www\\.googleapis\\.com$",
+      "^lh3\\.googleusercontent\\.com$"
     ],
     "deviations_ref": "agy",
     "cost_known_missing": "The title request agy sends to gemini-3.1-flash-lite-preview in every run is not in agy's token counts, so it is not in the cost."
@@ -162,8 +163,8 @@
         "what": "Permission rules deny command, unsandboxed, read_file, write_file, read_url, execute_url; mcp(naoqi/*) allowed; /work trusted"
       },
       {
-        "what": "Network: only daily-cloudcode-pa.googleapis.com, oauth2.googleapis.com and www.googleapis.com reachable; feature flags (antigravity-unleash.goog), logging (play.googleapis.com) and the update server blocked. www.googleapis.com is needed for agy's eligibility check (/oauth2/v2/userinfo) before every prompt; the proxy filters by host, so the host's other Google APIs are reachable for agy too (not for the agent, which has only the NAO tools)",
-        "approved": "2026-10-05; www.googleapis.com allowed 2026-10-06"
+        "what": "Network: only daily-cloudcode-pa.googleapis.com, oauth2.googleapis.com, www.googleapis.com and lh3.googleusercontent.com reachable; feature flags (antigravity-unleash.goog), logging (play.googleapis.com) and the update server blocked. agy's eligibility check before every prompt needs www.googleapis.com (/oauth2/v2/userinfo) and lh3.googleusercontent.com (the account's profile picture); found with pilot/tools/agy_hosts_check.sh. The proxy filters by host, so these hosts' other Google services are reachable for agy too (not for the agent, which has only the NAO tools)",
+        "approved": "2026-10-05; www.googleapis.com and lh3.googleusercontent.com allowed 2026-10-06"
       }
     ]
   }
