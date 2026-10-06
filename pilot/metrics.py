@@ -10,8 +10,10 @@ Per run:
     t_end = the moment the bridge returned the first rest's result (calls.jsonl). Both come from the Docker VM's
     clock. Only for runs that ended with rest.
   * tool_calls: the calls the bridge received up to and including the first rest, or up to the cap that ended the
-    run (the cap-th call; calls received before t0 + the wall-clock cap), or all logged calls for other ends.
-    Rejected (invalid arguments, unknown tool) and refused (a safety rule or busy) also counted separately.
+    run (the cap-th call; calls received before t0 + the wall-clock cap), or all logged calls for other ends, plus
+    the calls the harness itself rejected for invalid arguments before they reached the MCP server (from the
+    transcript, before the first rest). Rejected (invalid arguments, at the harness or the bridge) and refused (a
+    safety rule or busy) also counted separately.
   * cost_usd: from the harness's own report (pilot/config/agents.json, cost_sources); None when it is missing.
   * safety_events: falls, and obstacle and bumped outcomes, in the same window as tool_calls. Interventions apply
     to Search only.
@@ -37,14 +39,85 @@ def read_jsonl(path):
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()] if path.exists() else []
 
 
-def harness_cost(harness, agent_dir):
-    """The run's cost as the harness reports it, and where it came from."""
+def harness_cost(harness, agent_dir, price=None):
+    """The run's cost as the harness reports it (or its token counts at the manifest's list price), and where it
+    came from."""
     if harness == "claude-code":
         results = [e for e in read_jsonl(agent_dir / "transcript.jsonl") if e.get("type") == "result"]
         if results and results[-1].get("total_cost_usd") is not None:
             return results[-1]["total_cost_usd"], "Claude Code result event, total_cost_usd"
         return None, "missing: no result event with total_cost_usd in the transcript"
+    if harness == "opencode":
+        cost_file = agent_dir.parent / "cost.json"
+        if not cost_file.exists():
+            return None, "missing: no cost.json (OpenRouter usage not read)"
+        cost = json.loads(cost_file.read_text())
+        if not cost["settled"]:
+            return None, "missing: OpenRouter's usage did not settle within %d s" % cost["waited_s"]
+        return cost["cost_usd"], "OpenRouter usage of the shared key, after minus before the run"
+    if harness == "agy":
+        results = [e["result"] for e in read_jsonl_lenient(agent_dir / "transcript.jsonl") if e.get("event") == "result"]
+        if not results or not results[-1].get("usage"):
+            return None, "missing: no result event with token counts in agy's transcript"
+        if not price:
+            return None, "missing: no list price in the manifest"
+        usage, rate = results[-1]["usage"], price["usd_per_million_tokens"]
+        cost = (usage.get("input_tokens", 0) * rate["input"] + usage.get("cache_read_tokens", 0) * rate["cached_input"]
+                + usage.get("output_tokens", 0) * rate["output_including_thinking"]) / 1e6
+        return round(cost, 8), "agy token counts at the %s list price (%s, accessed %s)" % (
+            price["model"], price["tier"], price["accessed"])
     return None, "missing: cost collection for %s is not implemented yet" % harness
+
+
+def harness_rejected(harness, agent_dir):
+    """NAO tool calls the harness rejected for invalid arguments (they never reach the MCP server), in transcript
+    order, cut at the first rest call. None when this harness's transcript format is not handled."""
+    events = read_jsonl_lenient(agent_dir / "transcript.jsonl")
+    calls = []  # (tool, rejected) in transcript order
+    if harness == "opencode":
+        for e in events:
+            part = e.get("part") or {}
+            if e.get("type") == "tool_use" and part.get("type") == "tool":
+                state = part.get("state") or {}
+                calls.append((part.get("tool"), state.get("status") == "error"
+                              and str(state.get("error", "")).startswith("Invalid arguments")))
+    elif harness == "claude-code":
+        errors = {}
+        for e in events:
+            for block in ((e.get("message") or {}).get("content") or []) if e.get("type") == "user" else []:
+                if isinstance(block, dict) and block.get("type") == "tool_result" and block.get("is_error"):
+                    errors[block.get("tool_use_id")] = json.dumps(block.get("content"))
+        for e in events:
+            for block in ((e.get("message") or {}).get("content") or []) if e.get("type") == "assistant" else []:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    calls.append((block.get("name"), "InputValidationError" in errors.get(block.get("id"), "")))
+    elif harness == "agy":
+        # agy's own log (copied by the runner): each model turn lists its calls; a call agy rejects is followed by
+        # a step with status INVALID and an "invalid arguments" error.
+        for path in sorted(agent_dir.glob("agy-brain/*/.system_generated/logs/transcript_full.jsonl")):
+            for e in read_jsonl_lenient(path):
+                if e.get("type") == "PLANNER_RESPONSE":
+                    calls += [(c.get("name"), False) for c in e.get("tool_calls") or []]
+                elif e.get("status") == "INVALID" and str(e.get("error", "")).startswith("invalid arguments") and calls:
+                    calls[-1] = (calls[-1][0], True)
+    else:
+        return None
+    rejected = 0
+    for tool, was_rejected in calls:
+        rejected += was_rejected
+        if tool and tool.endswith("rest") and not was_rejected:
+            break
+    return rejected
+
+
+def read_jsonl_lenient(path):
+    records = []
+    for line in path.read_text(errors="replace").splitlines() if path.exists() else []:
+        try:
+            records.append(json.loads(line))
+        except ValueError:
+            pass  # e.g. a last line cut off when the container was stopped
+    return records
 
 
 def metrics(run_dir):
@@ -84,7 +157,8 @@ def metrics(run_dir):
         invalid.append("real-time factor %.3f below %.2f" % (rtf, rtf_min))
 
     outcomes = [(c.get("result") or {}).get("result") for c in calls if c["outcome"] == "ok"]
-    cost, cost_source = harness_cost(manifest["agent_config"]["harness"], run_dir / "agent")
+    cost, cost_source = harness_cost(manifest["agent_config"]["harness"], run_dir / "agent", manifest.get("price"))
+    at_harness = harness_rejected(manifest["agent_config"]["harness"], run_dir / "agent")
     return {
         "run_id": manifest["run_id"], "agent": manifest["agent"], "task": manifest["task"],
         "test_run": bool(manifest.get("test")),
@@ -104,8 +178,9 @@ def metrics(run_dir):
         if verdict and verdict.get("torso_xy") else None,
         "completion_time_s": round(rests[0]["returned"] - t0, 3) if normal_end and t0 is not None else None,
         "tool_calls": {
-            "total": len(calls),
-            "rejected": sum(c["outcome"] == "rejected" for c in calls),
+            "total": len(calls) + (at_harness or 0),
+            "rejected": sum(c["outcome"] == "rejected" for c in calls) + (at_harness or 0),
+            "rejected_by_harness": at_harness,  # None: not handled for this harness yet
             "refused": sum(c["outcome"] == "refused" for c in calls),
         },
         "cost_usd": cost, "cost_source": cost_source,

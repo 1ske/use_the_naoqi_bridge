@@ -1,0 +1,12 @@
+{
+  "_comment": "List prices for costing runs whose harness reports tokens, not cost (A6; agents.json, cost_sources). The runner copies the entry into every manifest that uses it, and refuses runs after valid_through.",
+  "gemini-3.8-flash": {
+    "source": "https://ai.google.dev/gemini-api/docs/pricing",
+    "accessed": "2026-10-06",
+    "tier": "Standard (paid tier)",
+    "valid_through": "2026-12-31",
+    "usd_per_million_tokens": {"input": 0.75, "cached_input": 0.075, "output_including_thinking": 3.75},
+    "token_mapping": "agy's result event: input_tokens excludes cached tokens, cache_read_tokens is the cached part, output_tokens includes thinking_tokens (checked with pilot/tools/fake_llm.py, 2026-10-06)",
+    "not_included": "the context-cache storage price (0.50 USD per million tokens per hour), which explicit caches pay; agy reports no cache storage"
+  }
+}

@@ -29,6 +29,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
@@ -36,7 +37,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "pilot"))
 import transcript_check  # noqa: E402
-from agent_container import AGENTS, AgentContainer, docker  # noqa: E402
+from agent_container import AGENTS, AgentContainer, agy_login_ok, docker  # noqa: E402
 
 PILOT_HOME = Path.home() / ".naoqi-pilot"
 INSTRUMENTATION = PILOT_HOME / "instrumentation"
@@ -49,10 +50,15 @@ SUPERVISOR = REPO / "pilot" / "supervisor" / "pilot_supervisor.py"
 PROTOCOL = json.loads((REPO / "pilot" / "config" / "protocol.json").read_text())
 WORLDS = json.loads((REPO / "pilot" / "config" / "worlds.json").read_text())
 LOCK = json.loads((REPO / "pilot" / "images.lock.json").read_text())
+PRICES = json.loads((REPO / "pilot" / "config" / "prices.json").read_text())
+PRICED_MODEL = {"agy": "gemini-3.8-flash"}  # harnesses whose cost is their token counts at a list price
 HARNESS_KEY = {"claude-code": "claude", "opencode": "opencode", "agy": "agy"}  # images.lock.json's names
 BRIDGE_HEALTH = "http://127.0.0.1:8765/health"
 SIM_NAOQI = "host.docker.internal:9559"  # naoqisim's published port; a simulated run never uses another NAOqi
 POLL = 0.1
+OPENROUTER_KEY = PILOT_HOME / "templates" / "openrouter" / "api-key"  # shared by A1-A4 (agents.json, cost_sources)
+OPENROUTER_KEY_INFO = "https://openrouter.ai/api/v1/key"
+USAGE_POLL, USAGE_STABLE_READS, USAGE_MAX_WAIT = 10, 3, 300  # s, equal reads in a row, s
 T0_TIMEOUT = 120  # s from container start; OpenCode alone waits up to 60 s for the MCP server
 
 
@@ -187,10 +193,48 @@ def start_fake_llm(container, script):
 
 
 def fake_llm_env(harness):
-    if harness != "claude-code":
-        raise SystemExit("--fake-llm is implemented for Claude Code agents only")
-    return {"CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-oat01-fake-llm-test-not-a-token",
-            "ANTHROPIC_BASE_URL": "http://fake-llm:8080", "NO_PROXY": "fake-llm"}
+    if harness == "claude-code":
+        return {"CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-oat01-fake-llm-test-not-a-token",
+                "ANTHROPIC_BASE_URL": "http://fake-llm:8080", "NO_PROXY": "fake-llm"}
+    if harness == "opencode":
+        return {"OPENROUTER_API_KEY": "sk-or-v1-fake-llm-test-not-a-key", "NO_PROXY": "fake-llm",
+                "OPENCODE_CONFIG_CONTENT": json.dumps(
+                    {"providers": {"openrouter": {"settings": {"baseURL": "http://fake-llm:8080/api/v1"}}}})}
+    if harness == "agy":  # plus the settings staged by stage_agy_fake_settings
+        return {"GEMINI_API_KEY": "fake-llm-test-not-a-key", "GOOGLE_GEMINI_BASE_URL": "http://fake-llm:8080",
+                "NO_PROXY": "fake-llm"}
+    raise SystemExit("--fake-llm is not implemented for %s" % harness)
+
+
+def stage_agy_fake_settings(container):
+    """agy reaches another endpoint only with modelProvider=gemini: the image's settings plus that, staged into the
+    container like a login (pilot/tools/capture_check.sh does the same)."""
+    settings = json.loads(docker("run", "--rm", "--entrypoint", "cat", container.spec["image"],
+                                 "/home/agent/.gemini/antigravity-cli/settings.json"))
+    settings["modelProvider"] = "gemini"
+    with tempfile.TemporaryDirectory() as stage:
+        target = Path(stage) / ".gemini" / "antigravity-cli"
+        target.mkdir(parents=True)
+        (target / "settings.json").write_text(json.dumps(settings))
+        docker("cp", stage + "/.", "%s:/stage" % container.name)
+
+
+# --- cost of OpenCode runs: the shared OpenRouter key's usage before and after the run ---------------------------
+def openrouter_usage(key):
+    request = urllib.request.Request(OPENROUTER_KEY_INFO, headers={"Authorization": "Bearer " + key})
+    with urllib.request.urlopen(request, timeout=15) as response:
+        return float(json.loads(response.read())["data"]["usage"])
+
+
+def settled_usage(key):
+    """The key's usage once it has stopped changing (OpenRouter updates it a little after the last request)."""
+    started, reads = time.time(), []
+    while time.time() - started < USAGE_MAX_WAIT:
+        time.sleep(USAGE_POLL)
+        reads.append(openrouter_usage(key))
+        if len(reads) >= USAGE_STABLE_READS and len(set(reads[-USAGE_STABLE_READS:])) == 1:
+            return reads[-1], round(time.time() - started), True
+    return reads[-1], round(time.time() - started), False
 
 
 # --- one run -------------------------------------------------------------------------------------------------
@@ -219,6 +263,12 @@ def run(agent, task, position=None, fake_script=None, test_caps=None):
         "protocol_values_decided": {k: PROTOCOL[k]["decided"] for k in ("prompts", "caps", "grace_period_s")},
         "test": None,
     }
+    if spec["harness"] in PRICED_MODEL:
+        price = PRICES[PRICED_MODEL[spec["harness"]]]
+        if datetime.date.today().isoformat() > price["valid_through"]:
+            raise SystemExit("pilot/config/prices.json: the %s price is only valid through %s; update it first"
+                             % (PRICED_MODEL[spec["harness"]], price["valid_through"]))
+        manifest["price"] = dict(price, model=PRICED_MODEL[spec["harness"]])
     log("run %s" % run_id)
     supervisor = None
     test_env = fake_llm_env(spec["harness"]) if fake_script else None
@@ -226,7 +276,14 @@ def run(agent, task, position=None, fake_script=None, test_caps=None):
                                proxy_allow=[r"^no-host-allowed-in-fake-llm-tests\.invalid$"] if fake_script else None)
     end, invalid, times = None, None, {}
     try:
+        if spec["harness"] == "agy" and not fake_script and not agy_login_ok(run_id):
+            end, invalid = "setup_failure", "the agy login has expired (agy models failed)"
+            raise RuntimeError(invalid)
         supervisor = reset(run_id, world)
+        if spec["harness"] == "opencode" and not fake_script:
+            container.openrouter_key = OPENROUTER_KEY.read_text().strip()
+            times["usage_before_read"] = time.time()
+            usage_before = openrouter_usage(container.openrouter_key)
         container.bridge = compose(REPO, "ps", "-q", "bridge")
         container.setup_network()
         if fake_script:
@@ -236,6 +293,8 @@ def run(agent, task, position=None, fake_script=None, test_caps=None):
                                 "fake_llm_requests": str(cap / "requests.jsonl"),
                                 "note": "Fake LLM (pilot/tools/fake_llm.py), fake login, no egress: not a real run."}
         manifest["image"] = {"name": spec["image"], "id": container.create(prompt)}
+        if fake_script and spec["harness"] == "agy":
+            stage_agy_fake_settings(container)
         log("starting the agent")
         container.start()
         times["container_started"] = time.time()
@@ -295,6 +354,13 @@ def run(agent, task, position=None, fake_script=None, test_caps=None):
         for name in ("calls.jsonl", "ground_truth.json"):
             if (instrumentation / name).exists():
                 shutil.copy(instrumentation / name, run_dir / name)
+        if container.openrouter_key:
+            log("waiting for OpenRouter's usage of the key to settle")
+            usage_after, waited, settled = settled_usage(container.openrouter_key)
+            (run_dir / "cost.json").write_text(json.dumps({
+                "source": "OpenRouter /api/v1/key usage of the shared A1-A4 key, after minus before the run",
+                "usage_before_usd": usage_before, "usage_after_usd": usage_after,
+                "cost_usd": round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited}, indent=2))
         check = transcript_check.check(agent, run_dir / "agent")
         (run_dir / "transcript_check.json").write_text(json.dumps(check, indent=2))
         if not check["transcript_found"] and not invalid:

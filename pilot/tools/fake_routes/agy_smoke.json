@@ -1,0 +1,32 @@
+{
+  "_comment": "Fake-LLM script (agy tool names) for a free smoke test of agy through the runner: get_state, stand, look around, rest. agy requires a toolSummary argument on every tool (it adds it to the declarations).",
+  "steps": [
+    {
+      "tool": "mcp_naoqi_get_state",
+      "args": {
+        "toolSummary": "Robot state check"
+      }
+    },
+    {
+      "tool": "mcp_naoqi_stand",
+      "args": {
+        "toolSummary": "Robot stand up"
+      }
+    },
+    {
+      "tool": "mcp_naoqi_look_around",
+      "args": {
+        "toolSummary": "Surroundings check"
+      }
+    },
+    {
+      "tool": "mcp_naoqi_rest",
+      "args": {
+        "toolSummary": "Robot rest"
+      }
+    },
+    {
+      "text": "The robot is resting."
+    }
+  ]
+}

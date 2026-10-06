@@ -10,6 +10,7 @@ next step of /cap/script.json: {"steps": [{"tool": NAME, "args": {...}} | {"text
 it answers with text. A request without tools (title or other side request) gets the text "Side reply".
 Usage is distinctive so that a harness's reported totals show which responses it counted:
   main step i (1-based): input 1000*i, output 10*i, thinking 1*i;   side request: input 100000, output 7.
+Gemini responses also report a tenth of the input as cached (cachedContentTokenCount, included in the input).
 """
 import json
 import time
@@ -99,6 +100,7 @@ class Handler(BaseHTTPRequestHandler):
         payload = {"candidates": [{"content": {"role": "model", "parts": [part]}, "finishReason": "STOP", "index": 0}],
                    "usageMetadata": {"promptTokenCount": usage["input"], "candidatesTokenCount": usage["output"],
                                      "thoughtsTokenCount": usage["thinking"],
+                                     "cachedContentTokenCount": usage["input"] // 10,  # part of promptTokenCount
                                      "totalTokenCount": usage["input"] + usage["output"] + usage["thinking"]},
                    "modelVersion": self.path.split("/models/")[-1].split(":")[0]}
         if stream:

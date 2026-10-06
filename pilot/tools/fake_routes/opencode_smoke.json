@@ -1,0 +1,10 @@
+{
+  "_comment": "Fake-LLM script (OpenCode tool names) for a free smoke test of OpenCode through the runner: get_state, stand, look around, rest.",
+  "steps": [
+    {"tool": "naoqi_get_state", "args": {}},
+    {"tool": "naoqi_stand", "args": {}},
+    {"tool": "naoqi_look_around", "args": {}},
+    {"tool": "naoqi_rest", "args": {}},
+    {"text": "The robot is resting."}
+  ]
+}

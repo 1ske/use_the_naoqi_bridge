@@ -76,9 +76,10 @@
   },
   "cost_sources": {
     "_comment": "Where each agent's cost comes from (decided 2026-10-05). A value that is not reported is recorded as missing, never estimated.",
-    "opencode": "The run's own OpenRouter key: its usage after the run (all requests of the run, including the title request).",
+    "opencode": "One OpenRouter API key shared by all A1-A4 runs (~/.naoqi-pilot/templates/openrouter/api-key, limit 50 USD): a run's cost is the key's usage after the run minus its usage before it, read from OpenRouter's /api/v1/key once the value has stopped changing. Valid because runs never overlap and nothing else uses the key; includes all requests of the run, also the title request.",
     "claude-code": "total_cost_usd from Claude Code's result event (computed by Claude Code at Anthropic's list price).",
-    "agy": "agy's token counts from its result event, priced at Google's list price for gemini-3.8-flash; the price used is stored in the manifest."
+    "agy": "agy's token counts from its result event, priced at Google's list price for gemini-3.8-flash; the price used is stored in the manifest.",
+    "opencode_approved": "2026-10-06: shared key with usage difference instead of one key per run (no provisioning key)"
   },
   "transcript_check": {
     "_comment": "Fixed 2026-10-05, before the pilot. Applied by pilot/transcript_check.py after every run.",
