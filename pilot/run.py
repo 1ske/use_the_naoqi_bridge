@@ -278,7 +278,7 @@ def run(agent, task, position=None, fake_script=None, test_caps=None):
         "world_file": world["file"], "world_sha256": hashlib.sha256(world_file.read_bytes()).hexdigest(),
         "prompt": prompt, "caps": caps, "grace_period_s": grace,
         "protocol_values_decided": {k: PROTOCOL[k]["decided"] for k in ("prompts", "caps", "grace_period_s")},
-        "test": None,
+        "test": {"fake_llm": True} if fake_script else None,  # completed once the fake LLM has started
     }
     if spec["harness"] in PRICED_MODEL:
         price = PRICES[PRICED_MODEL[spec["harness"]]]

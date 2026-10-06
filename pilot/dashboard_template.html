@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NAO pilot dashboard</title>
+<style>
+.viz-root {
+  color-scheme: light;
+  --surface-1: #fcfcfb; --page: #f9f9f7; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10); --wall: #b9b8b1; --area: #e8f3e8;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b; --good-text: #006300;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --surface-1: #1a1a19; --page: #0d0d0d; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --wall: #55544f; --area: #1f3320;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --good-text: #0ca30c;
+  }
+}
+:root[data-theme="dark"] .viz-root {
+  color-scheme: dark;
+  --surface-1: #1a1a19; --page: #0d0d0d; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --wall: #55544f; --area: #1f3320;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --good-text: #0ca30c;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+.viz-root { background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  min-height: 100vh; padding: 20px 28px 60px; }
+h1 { font-size: 20px; margin: 0 0 2px; } h2 { font-size: 16px; margin: 28px 0 10px; } h3 { font-size: 14px; margin: 18px 0 6px; }
+.sub { color: var(--ink-2); font-size: 13px; }
+.filters { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 16px 0 6px; padding: 10px 12px;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; }
+.filters label { color: var(--ink-2); display: inline-flex; gap: 5px; align-items: center; }
+#f-agents { display: inline-flex; gap: 14px; flex-wrap: wrap; }
+select, button { font: inherit; color: var(--ink); background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 6px; padding: 3px 8px; }
+button { cursor: pointer; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin: 10px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; color: var(--ink-2); font-weight: 600; border-bottom: 1px solid var(--axis); padding: 5px 8px; white-space: nowrap; }
+td { border-bottom: 1px solid var(--grid); padding: 5px 8px; vertical-align: top; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr.click { cursor: pointer; } tr.click:hover td { background: var(--grid); }
+tr.sel td { background: var(--grid); }
+th.sort { cursor: pointer; } th.sort:hover { color: var(--ink); }
+.key { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; margin-right: 5px; }
+.badge { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 9px; border: 1px solid var(--border); color: var(--ink-2); margin-left: 4px; }
+.status { font-size: 12px; white-space: nowrap; } .st-good { color: var(--good-text); } .st-crit { color: var(--critical); }
+.st-ser { color: var(--serious); } .st-warn { color: var(--ink-2); }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 1100px) { .grid2 { grid-template-columns: 1fr; } }
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 18px; font-size: 13px; }
+.facts div span { color: var(--muted); display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+svg text { fill: var(--muted); font: 11px system-ui, -apple-system, "Segoe UI", sans-serif; }
+svg .lab { fill: var(--ink-2); } svg .ink { fill: var(--ink); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--ink-2); margin: 4px 0 8px; }
+#tip { position: fixed; pointer-events: none; z-index: 10; background: var(--surface-1); color: var(--ink); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.15); max-width: 420px; display: none; white-space: pre-wrap; }
+#tip b { font-size: 13px; }
+.gallery { display: flex; flex-wrap: wrap; gap: 10px; }
+.gallery figure { margin: 0; width: 260px; } .gallery img { width: 260px; border-radius: 6px; border: 1px solid var(--border); cursor: zoom-in; }
+.gallery figcaption { font-size: 11px; color: var(--muted); }
+pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: var(--page); padding: 8px; border-radius: 6px; margin: 4px 0; max-height: 360px; overflow: auto; }
+details summary { cursor: pointer; color: var(--ink-2); }
+.answer { white-space: pre-wrap; font-size: 13px; }
+.note { color: var(--muted); font-size: 12px; }
+#zoom { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; z-index: 20; cursor: zoom-out; }
+#zoom img { max-width: 92vw; max-height: 90vh; }
+</style>
+</head>
+<body>
+<div class="viz-root" id="root">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+    <div><h1>NAO MCP pilot</h1><div class="sub" id="gen"></div></div>
+    <button id="theme" title="Switch light / dark">Light / dark</button>
+  </div>
+  <div class="filters" id="filters">
+    <label>Task <select id="f-task"></select></label>
+    <label><input type="checkbox" id="f-test"> test runs (fake LLM)</label>
+    <label><input type="checkbox" id="f-excl"> excluded runs</label>
+    <label><input type="checkbox" id="f-invalid" checked> invalid runs</label>
+    <span id="f-agents"></span>
+  </div>
+  <div class="note">Agent summary and charts use valid, non-excluded real runs only; completion time and tool calls over successful runs only (section 5.1.4). Filters scope everything on the page.</div>
+
+  <h2>Agents</h2>
+  <div class="card"><table id="summary"></table>
+    <div class="note" style="margin-top:6px">Success rate with a 95&nbsp;% Wilson interval. Checks: instruction and image check (section 5.1.5), attempts passed.</div></div>
+
+  <div class="grid2">
+    <div class="card"><h3 style="margin-top:0">Distance to the goal surface at rest</h3><div class="legend" id="lg-strip"></div><div id="c-dist"></div></div>
+    <div class="card"><h3 style="margin-top:0">Completion time T (s)</h3><div class="legend" id="lg-strip2"></div><div id="c-time"></div></div>
+  </div>
+  <div class="grid2">
+    <div class="card"><h3 style="margin-top:0">Cost per run (USD; A5, A6: list price, not billed)</h3><div id="c-cost"></div></div>
+    <div class="card"><h3 style="margin-top:0">Tool calls per run</h3><div id="c-calls"></div></div>
+  </div>
+
+  <h2>Runs</h2>
+  <div class="card"><table id="runs"></table></div>
+
+  <div id="detail"></div>
+
+  <h2>Instruction and image check</h2>
+  <div class="card"><table id="checks"></table></div>
+</div>
+<div id="tip"></div>
+<div id="zoom"><img alt=""></div>
+<script>
+const DATA = /*__DATA__*/null;
+const AGENT_IDS = Object.keys(DATA.agents).sort();
+const SLOT = Object.fromEntries(AGENT_IDS.map((a, i) => [a, `var(--s${i + 1})`]));
+const $ = s => document.querySelector(s);
+const NS = "http://www.w3.org/2000/svg";
+const state = { task: null, test: false, excl: false, invalid: true, agents: new Set(AGENT_IDS), sort: ["started", -1], run: null };
+
+// ---------- helpers ----------
+function el(tag, attrs = {}, text) {
+  const e = tag.startsWith("svg:") ? document.createElementNS(NS, tag.slice(4)) : document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) if (v !== undefined && v !== null) e.setAttribute(k, v);
+  if (text !== undefined && text !== null) e.textContent = text;
+  return e;
+}
+const fmt = (v, d = 2) => v === null || v === undefined || Number.isNaN(v) ? "–" : (typeof v === "number" ? v.toFixed(d) : String(v));
+const median = a => { const s = a.filter(v => v !== null && v !== undefined).sort((x, y) => x - y); if (!s.length) return null;
+  const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+function wilson(k, n) { if (!n) return [null, null]; const z = 1.96, p = k / n, d = 1 + z * z / n;
+  const c = (p + z * z / (2 * n)) / d, h = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d; return [Math.max(0, c - h), Math.min(1, c + h)]; }
+const tip = $("#tip");
+function showTip(ev, lines) { tip.replaceChildren(); lines.forEach((l, i) => { const n = i === 0 ? el("b", {}, l) : document.createTextNode("\n" + l); tip.append(n); });
+  tip.style.display = "block"; const x = ev.clientX + 14, y = ev.clientY + 14;
+  tip.style.left = Math.min(x, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = Math.min(y, innerHeight - tip.offsetHeight - 8) + "px"; }
+const hideTip = () => tip.style.display = "none";
+function hover(node, lines) { node.addEventListener("pointermove", ev => showTip(ev, typeof lines === "function" ? lines() : lines));
+  node.addEventListener("pointerleave", hideTip); node.setAttribute("tabindex", "0");
+  node.addEventListener("focus", ev => { const r = node.getBoundingClientRect(); showTip({ clientX: r.right, clientY: r.top }, typeof lines === "function" ? lines() : lines); });
+  node.addEventListener("blur", hideTip); }
+function ticks(lo, hi, n = 6) { const span = hi - lo || 1, step0 = span / n, mag = 10 ** Math.floor(Math.log10(step0));
+  const step = [1, 2, 2.5, 5, 10].map(s => s * mag).find(s => span / s <= n) || 10 * mag;
+  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10)); return out; }
+const M = r => r.metrics || {};
+const isValidReal = r => !r.test && !M(r).excluded && M(r).valid;
+
+// ---------- filtering ----------
+function visibleRuns() {
+  return DATA.runs.filter(r => r.task_key === state.task && state.agents.has(r.agent) && (state.test || !r.test)
+    && (state.excl || !M(r).excluded) && (state.invalid || M(r).valid));
+}
+function analysisRuns() { return DATA.runs.filter(r => r.task_key === state.task && state.agents.has(r.agent) && isValidReal(r)); }
+
+// ---------- agent summary ----------
+function renderSummary() {
+  const t = $("#summary"); t.replaceChildren();
+  const head = el("tr"); ["Agent", "LLM / harness", "Valid runs", "Success", "Rate (95 % CI)", "Median T*", "Median calls*", "Median cost",
+    "Falls", "Obstacle", "Bumped", "Rejected", "Refused", "get_state→stand", "Instr. check", "Image check"].forEach((h, i) =>
+    head.append(el("th", { class: i >= 2 ? "num" : "" }, h))); t.append(head);
+  const runs = analysisRuns();
+  for (const a of AGENT_IDS.filter(a => state.agents.has(a))) {
+    const rs = runs.filter(r => r.agent === a), ok = rs.filter(r => M(r).task_success === 1), n = rs.length, k = ok.length;
+    const [lo, hi] = wilson(k, n), sum = f => rs.reduce((s, r) => s + (f(r) || 0), 0);
+    const chk = c => { const at = DATA.checks.filter(x => x.agent === a && x.check === c); return at.length ? `${at.filter(x => x.passed).length}/${at.length}` : "–"; };
+    const tr = el("tr");
+    const c0 = el("td"); c0.append(el("span", { class: "dot", style: `background:${SLOT[a]}` }), document.createTextNode(a)); tr.append(c0);
+    tr.append(el("td", {}, `${DATA.agents[a].llm} / ${DATA.agents[a].harness}`));
+    [[n], [k], [n ? `${Math.round(100 * k / n)} % (${Math.round(100 * lo)}–${Math.round(100 * hi)})` : "–"],
+     [fmt(median(ok.map(r => M(r).completion_time_s)), 0)], [fmt(median(ok.map(r => M(r).tool_calls.total)), 0)],
+     [fmt(median(rs.map(r => M(r).cost_usd)), 3)], [sum(r => M(r).safety_events.falls)], [sum(r => M(r).safety_events.obstacle)],
+     [sum(r => M(r).safety_events.bumped)], [sum(r => M(r).tool_calls.rejected)], [sum(r => M(r).tool_calls.refused)],
+     [n ? `${rs.filter(r => M(r).instruction_following).length}/${n}` : "–"], [chk("instructions")], [chk("image")]]
+      .forEach(([v]) => tr.append(el("td", { class: "num" }, v)));
+    t.append(tr);
+  }
+  const foot = el("tr"); foot.append(el("td", { colspan: 16, class: "note" }, "* over successful runs only. Falls, obstacle, bumped, rejected, refused: totals over valid runs."));
+  t.append(foot);
+}
+
+// ---------- strip charts (one row per agent, shared x) ----------
+function strip(container, value, opts = {}) {
+  const box = $(container); box.replaceChildren();
+  const agents = AGENT_IDS.filter(a => state.agents.has(a)), runs = analysisRuns().filter(r => value(r) !== null && value(r) !== undefined);
+  const W = 560, rowH = 30, L = 46, R = 16, T = 8, B = 30, H = T + B + rowH * agents.length;
+  const vals = runs.map(value).concat(opts.ref !== undefined ? [opts.ref] : []);
+  let lo = Math.min(0, ...vals), hi = Math.max(...vals, opts.minHi || 0); if (!vals.length) { lo = 0; hi = 1; } hi = hi * 1.05 || 1;
+  const x = v => L + (v - lo) / (hi - lo) * (W - L - R);
+  const svg = el("svg:svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": opts.label || "" });
+  for (const tv of ticks(lo, hi)) { svg.append(el("svg:line", { x1: x(tv), x2: x(tv), y1: T, y2: H - B, stroke: "var(--grid)" }));
+    svg.append(el("svg:text", { x: x(tv), y: H - B + 16, "text-anchor": "middle" }, opts.tickFmt ? opts.tickFmt(tv) : tv)); }
+  if (opts.ref !== undefined) { svg.append(el("svg:rect", { x: x(lo), y: T, width: x(opts.ref) - x(lo), height: H - T - B, fill: "var(--area)" }));
+    svg.append(el("svg:line", { x1: x(opts.ref), x2: x(opts.ref), y1: T, y2: H - B, stroke: "var(--good)", "stroke-width": 2, "stroke-dasharray": "4 3" }));
+    svg.append(el("svg:text", { x: x(opts.ref) + 4, y: T + 10, class: "lab" }, opts.refLabel)); }
+  agents.forEach((a, i) => {
+    const cy = T + rowH * i + rowH / 2;
+    svg.append(el("svg:text", { x: L - 8, y: cy + 4, "text-anchor": "end", class: "lab" }, a));
+    svg.append(el("svg:line", { x1: L, x2: W - R, y1: cy, y2: cy, stroke: "var(--grid)", "stroke-dasharray": "1 3" }));
+    runs.filter(r => r.agent === a).forEach((r, j) => {
+      const okRun = M(r).task_success === 1, cx = x(value(r)), yy = cy + ((j % 3) - 1) * 5;
+      const g = el("svg:g", { class: "pt", style: "cursor:pointer" });
+      g.append(el("svg:circle", { cx, cy: yy, r: 12, fill: "transparent" }));
+      g.append(el("svg:circle", { cx, cy: yy, r: 5, fill: okRun ? SLOT[a] : "var(--surface-1)", stroke: SLOT[a], "stroke-width": 2 }));
+      hover(g, () => [`${fmt(value(r), opts.digits ?? 2)} ${opts.unit || ""}`, `${r.run_id}`, okRun ? "success" : `fail: ${M(r).success_check.reason}`]);
+      g.addEventListener("click", () => openRun(r.run_id)); svg.append(g);
+    });
+  });
+  svg.append(el("svg:text", { x: (W + L) / 2, y: H - 2, "text-anchor": "middle" }, opts.axis || ""));
+  box.append(svg);
+}
+function stripLegend(sel) { const lg = $(sel); lg.replaceChildren();
+  const a = el("span"); a.append(el("span", { class: "dot", style: "background:var(--ink-2)" }), document.createTextNode("success"));
+  const b = el("span"); b.append(el("span", { class: "dot", style: "border:2px solid var(--ink-2);width:9px;height:9px" }), document.createTextNode("failure"));
+  lg.append(a, b, el("span", {}, "one row per agent · click a point to open the run")); }
+
+// ---------- runs table ----------
+const COLS = [
+  ["started", "Started", r => r.started || "", v => String(v).slice(5, 16).replace("T", " ")],
+  ["agent", "Agent", r => r.agent], ["valid", "Valid", r => M(r).valid], ["success", "Success", r => M(r).task_success],
+  ["end", "End", r => r.manifest.end_condition], ["dist", "Dist. (m)", r => M(r).distance_to_goal_m, v => fmt(v)],
+  ["T", "T (s)", r => M(r).completion_time_s, v => fmt(v, 0)], ["calls", "Calls", r => M(r).tool_calls?.total],
+  ["rej", "Rej.", r => M(r).tool_calls?.rejected], ["ref", "Ref.", r => M(r).tool_calls?.refused],
+  ["falls", "Falls", r => M(r).safety_events?.falls], ["obst", "Obst.", r => M(r).safety_events?.obstacle],
+  ["instr", "get_state→stand", r => M(r).instruction_following], ["cost", "Cost $", r => M(r).cost_usd, v => fmt(v, 3)],
+  ["rtf", "RTF", r => M(r).real_time_factor, v => fmt(v, 3)],
+];
+function statusCell(r) {
+  const td = el("td", { class: "status" }), m = M(r);
+  if (m.error) { td.className += " st-crit"; td.textContent = "✕ metrics error"; return td; }
+  if (m.excluded) { td.className += " st-warn"; td.textContent = "⊘ excluded"; td.title = m.excluded; return td; }
+  if (!m.valid) { td.className += " st-ser"; td.textContent = "▲ invalid"; td.title = m.invalid_reasons.join("; "); return td; }
+  td.className += " st-good"; td.textContent = "✓ valid"; return td;
+}
+function renderRuns() {
+  const t = $("#runs"); t.replaceChildren(); const head = el("tr");
+  COLS.forEach(([key, label]) => { const th = el("th", { class: "sort" + (["dist", "T", "calls", "rej", "ref", "falls", "obst", "cost", "rtf"].includes(key) ? " num" : "") },
+    label + (state.sort[0] === key ? (state.sort[1] > 0 ? " ↑" : " ↓") : ""));
+    th.addEventListener("click", () => { state.sort = [key, state.sort[0] === key ? -state.sort[1] : -1]; renderRuns(); }); head.append(th); });
+  t.append(head);
+  const [key, dir] = state.sort, col = COLS.find(c => c[0] === key);
+  const rows = visibleRuns().sort((a, b) => { const va = col[2](a), vb = col[2](b); return (va > vb ? 1 : va < vb ? -1 : 0) * dir; });
+  for (const r of rows) {
+    const tr = el("tr", { class: "click" + (state.run === r.run_id ? " sel" : "") }); tr.addEventListener("click", () => openRun(r.run_id));
+    COLS.forEach(([k, , get, f]) => {
+      if (k === "valid") { tr.append(statusCell(r)); return; }
+      if (k === "agent") { const td = el("td"); td.append(el("span", { class: "dot", style: `background:${SLOT[r.agent]}` }), document.createTextNode(r.agent));
+        if (r.test) td.append(el("span", { class: "badge" }, "test")); tr.append(td); return; }
+      if (k === "success") { const v = get(r); tr.append(el("td", { class: "status " + (v === 1 ? "st-good" : "") }, v === 1 ? "✓ success" : v === 0 ? "✕ fail" : "–")); return; }
+      if (k === "instr") { const v = get(r); tr.append(el("td", {}, v === true ? "yes" : v === false ? "no" : "–")); return; }
+      const v = get(r); tr.append(el("td", { class: typeof v === "number" ? "num" : "" }, f ? f(v) : (v ?? "–")));
+    });
+    t.append(tr);
+  }
+  if (!rows.length) t.append(el("tr", {}, "")).append(el("td", { colspan: COLS.length, class: "note" }, "No runs match the filters."));
+}
+
+// ---------- run detail ----------
+function openRun(id) { state.run = id; renderRuns(); renderDetail(); $("#detail").scrollIntoView({ behavior: "smooth", block: "start" }); }
+function fact(parent, label, value) { const d = el("div"); d.append(el("span", {}, label), document.createTextNode(value ?? "–")); parent.append(d); }
+function resultSummary(c) {
+  if (c.outcome !== "ok") return `${c.outcome}: ${c.error || ""}`;
+  const r = c.result || {}, bits = [];
+  if (r.result) bits.push(r.result);
+  if (r.stopped_by) bits.push("stopped by " + Object.values(r.stopped_by).join(", "));
+  if (r.odometry_delta) bits.push(`odometry Δ x ${fmt(r.odometry_delta.x)} y ${fmt(r.odometry_delta.y)} θ ${fmt(r.odometry_delta.theta)}`);
+  const st = r.state || r; if (st.sonar_m) bits.push(`sonar L ${fmt(st.sonar_m.left)} R ${fmt(st.sonar_m.right)}`);
+  if (st.posture) bits.push(st.posture + (st.fallen ? " (fallen)" : ""));
+  if (r.text) bits.push(`"${r.text}"`);
+  return bits.join(" · ");
+}
+function callStatus(c) { const res = c.result && c.result.result;
+  if (c.outcome !== "ok") return { color: c.outcome === "rejected" ? "var(--warning)" : c.outcome === "refused" ? "var(--serious)" : "var(--critical)", icon: c.outcome === "rejected" ? "◆" : c.outcome === "refused" ? "▲" : "✕" };
+  if (res === "fell") return { color: "var(--critical)", icon: "✕" };
+  if (res === "obstacle" || res === "bumped") return { color: "var(--serious)", icon: "■" };
+  return { color: "var(--muted)", icon: "" }; }
+
+function floorPlan(r, world) {
+  const W = 560, pad = 24, xs = world.walls.flatMap(w => [w.x0, w.x1]), ys = world.walls.flatMap(w => [w.y0, w.y1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const s = (W - 2 * pad) / (x1 - x0), H = (y1 - y0) * s + 2 * pad;
+  const X = v => pad + (v - x0) * s, Y = v => H - pad - (v - y0) * s;
+  const svg = el("svg:svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": "floor plan with the robot's path" });
+  const a = world.area; svg.append(el("svg:rect", { x: X(a.x[0]), y: Y(a.y[1]), width: (a.x[1] - a.x[0]) * s, height: (a.y[1] - a.y[0]) * s, fill: "var(--area)", stroke: "var(--good)", "stroke-dasharray": "4 3" }));
+  svg.append(el("svg:text", { x: X(a.x[0]) + 4, y: Y(a.y[0]) - 4, class: "lab" }, `success area (d = ${a.d} m)`));
+  for (const w of world.walls) svg.append(el("svg:rect", { x: X(w.x0), y: Y(w.y1), width: (w.x1 - w.x0) * s, height: Math.max(2, (w.y1 - w.y0) * s), rx: 1, fill: w.goal ? "var(--good)" : "var(--wall)" }));
+  svg.append(el("svg:text", { x: X(world.start[0]), y: Y(world.start[1]) + 22, "text-anchor": "middle", class: "lab" }, "start"));
+  svg.append(el("svg:circle", { cx: X(world.start[0]), cy: Y(world.start[1]), r: 4, fill: "none", stroke: "var(--ink-2)", "stroke-width": 2 }));
+  const tr = r.trajectory;
+  const at = t => { if (!tr.length || t === null) return null; let best = tr[0]; for (const p of tr) { if (Math.abs(p[0] - t) < Math.abs(best[0] - t)) best = p; } return best; };
+  if (tr.length) {
+    svg.append(el("svg:polyline", { points: tr.map(p => `${X(p[1]).toFixed(1)},${Y(p[2]).toFixed(1)}`).join(" "), fill: "none", stroke: SLOT[r.agent], "stroke-width": 2, "stroke-linejoin": "round" }));
+    for (const p of tr.filter((p, i) => i % 50 === 0 && p[0] >= 0)) {   // every 10 s
+      svg.append(el("svg:circle", { cx: X(p[1]), cy: Y(p[2]), r: 2.5, fill: SLOT[r.agent] }));
+      svg.append(el("svg:text", { x: X(p[1]) + 5, y: Y(p[2]) - 4 }, `${Math.round(p[0])} s`)); }
+    // events: move calls that ended in obstacle/bumped/fell, refused/rejected calls, falls
+    r.calls.forEach((c, i) => { const st = callStatus(c); if (!st.icon) return; const p = at(c.end); if (!p) return;
+      const g = el("svg:g"); g.append(el("svg:circle", { cx: X(p[1]), cy: Y(p[2]), r: 12, fill: "transparent" }));
+      g.append(el("svg:text", { x: X(p[1]), y: Y(p[2]) + 4, "text-anchor": "middle", style: `fill:${st.color};font-size:13px` }, st.icon));
+      hover(g, [`#${i + 1} ${c.tool} → ${c.outcome === "ok" ? c.result?.result : c.outcome}`, `t = ${fmt(c.end, 1)} s`, resultSummary(c)]); svg.append(g); });
+    r.falls.forEach(f => { const p = at(f.t); if (!p) return; const g = el("svg:g");
+      g.append(el("svg:circle", { cx: X(p[1]), cy: Y(p[2]), r: 12, fill: "transparent" }));
+      g.append(el("svg:text", { x: X(p[1]), y: Y(p[2]) + 5, "text-anchor": "middle", style: "fill:var(--critical);font-size:16px;font-weight:700" }, "✕"));
+      hover(g, [`fall (bridge): ${f.cause}`, `t = ${fmt(f.t, 1)} s`, `tilt at that time: ${fmt(p[4], 1)}°`]); svg.append(g); });
+  }
+  const rest = r.ground_truth.rest;
+  if (rest) { const g = el("svg:g"); g.append(el("svg:circle", { cx: X(rest.torso[0]), cy: Y(rest.torso[1]), r: 14, fill: "transparent" }));
+    g.append(el("svg:circle", { cx: X(rest.torso[0]), cy: Y(rest.torso[1]), r: 6, fill: SLOT[r.agent], stroke: "var(--surface-1)", "stroke-width": 2 }));
+    g.append(el("svg:text", { x: X(rest.torso[0]) + 9, y: Y(rest.torso[1]) + 4, class: "ink" }, "rest"));
+    hover(g, [`torso at rest: (${fmt(rest.torso[0])}, ${fmt(rest.torso[1])}) m`, `tilt ${fmt(rest.tilt_deg, 1)}°, upright: ${rest.upright}`, `distance to goal: ${fmt(M(r).distance_to_goal_m)} m`]); svg.append(g); }
+  return svg;
+}
+
+function timeline(r) {
+  const tools = [...new Set(r.calls.map(c => c.tool))], W = 1100, L = 90, R = 16, T = 10, rowH = 22, B = 28, H = T + B + rowH * tools.length;
+  const ends = r.calls.map(c => c.end).filter(v => v !== null).concat(r.trajectory.map(p => p[0]));
+  const hi = Math.max(1, ...ends) * 1.02, lo = Math.min(0, ...r.calls.map(c => c.start ?? 0)), x = v => L + (v - lo) / (hi - lo) * (W - L - R);
+  const svg = el("svg:svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": "call timeline" });
+  for (const tv of ticks(lo, hi, 12)) { svg.append(el("svg:line", { x1: x(tv), x2: x(tv), y1: T, y2: H - B, stroke: "var(--grid)" }));
+    svg.append(el("svg:text", { x: x(tv), y: H - B + 15, "text-anchor": "middle" }, tv)); }
+  svg.append(el("svg:text", { x: (W + L) / 2, y: H - 2, "text-anchor": "middle" }, "seconds since t0"));
+  tools.forEach((tool, i) => svg.append(el("svg:text", { x: L - 8, y: T + rowH * i + 15, "text-anchor": "end", class: "lab" }, tool)));
+  r.calls.forEach((c, i) => { if (c.start === null) return; const row = tools.indexOf(c.tool), st = callStatus(c);
+    const x0 = x(c.start), w = Math.max(3, x(c.end ?? c.start) - x0), y = T + rowH * row + 4;
+    const g = el("svg:g"); g.append(el("svg:rect", { x: x0 - 3, y: y - 3, width: w + 6, height: rowH, fill: "transparent" }));
+    g.append(el("svg:rect", { x: x0, y, width: w, height: rowH - 8, rx: 3, fill: st.color }));
+    if (st.icon) g.append(el("svg:text", { x: x0 + w + 3, y: y + 11, style: `fill:${st.color}` }, st.icon));
+    hover(g, [`#${i + 1} ${c.tool}  ${fmt(c.start, 1)}–${fmt(c.end, 1)} s`, `args: ${JSON.stringify(c.args)}`, resultSummary(c)]); svg.append(g); });
+  r.falls.forEach(f => { if (f.t === null) return; svg.append(el("svg:line", { x1: x(f.t), x2: x(f.t), y1: T, y2: H - B, stroke: "var(--critical)", "stroke-width": 2 }));
+    svg.append(el("svg:text", { x: x(f.t) + 3, y: T + 10, style: "fill:var(--critical)" }, "✕ fall")); });
+  return svg;
+}
+
+function lineChart(r, idx, label, unit, ref) {
+  const tr = r.trajectory, W = 540, L = 46, R = 12, T = 10, B = 28, H = 170;
+  const vals = tr.map(p => p[idx]), lo = Math.min(...vals, ref ?? Infinity, 0), hi = Math.max(...vals, ref ?? -Infinity) * 1.05 || 1;
+  const t0 = tr[0][0], t1 = tr[tr.length - 1][0], x = v => L + (v - t0) / (t1 - t0 || 1) * (W - L - R), y = v => H - B - (v - lo) / (hi - lo) * (H - T - B);
+  const svg = el("svg:svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": label });
+  for (const tv of ticks(lo, hi, 4)) { svg.append(el("svg:line", { x1: L, x2: W - R, y1: y(tv), y2: y(tv), stroke: "var(--grid)" }));
+    svg.append(el("svg:text", { x: L - 6, y: y(tv) + 4, "text-anchor": "end" }, tv)); }
+  for (const tv of ticks(t0, t1, 8)) svg.append(el("svg:text", { x: x(tv), y: H - B + 15, "text-anchor": "middle" }, tv));
+  svg.append(el("svg:text", { x: (W + L) / 2, y: H - 2, "text-anchor": "middle" }, "seconds since t0"));
+  if (ref !== undefined) { svg.append(el("svg:line", { x1: L, x2: W - R, y1: y(ref), y2: y(ref), stroke: "var(--critical)", "stroke-dasharray": "4 3" }));
+    svg.append(el("svg:text", { x: W - R, y: y(ref) - 4, "text-anchor": "end", style: "fill:var(--critical)" }, `upright limit ${ref}°`)); }
+  r.falls.forEach(f => f.t !== null && svg.append(el("svg:line", { x1: x(f.t), x2: x(f.t), y1: T, y2: H - B, stroke: "var(--critical)", "stroke-width": 1.5 })));
+  svg.append(el("svg:polyline", { points: tr.map(p => `${x(p[0]).toFixed(1)},${y(p[idx]).toFixed(1)}`).join(" "), fill: "none", stroke: SLOT[r.agent], "stroke-width": 2 }));
+  const cross = el("svg:line", { y1: T, y2: H - B, stroke: "var(--axis)", visibility: "hidden" }), hit = el("svg:rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" });
+  svg.append(cross, hit);
+  hit.addEventListener("pointermove", ev => { const b = svg.getBoundingClientRect(), vx = (ev.clientX - b.left) / b.width * W, t = t0 + (vx - L) / (W - L - R) * (t1 - t0);
+    let p = tr[0]; for (const q of tr) if (Math.abs(q[0] - t) < Math.abs(p[0] - t)) p = q;
+    cross.setAttribute("x1", x(p[0])); cross.setAttribute("x2", x(p[0])); cross.setAttribute("visibility", "visible");
+    showTip(ev, [`${fmt(p[idx], 1)} ${unit}`, `${label} at t = ${fmt(p[0], 1)} s`, `position (${fmt(p[1])}, ${fmt(p[2])}) m`]); });
+  hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+  return svg;
+}
+
+function renderDetail() {
+  const r = DATA.runs.find(x => x.run_id === state.run), box = $("#detail"); box.replaceChildren(); if (!r) return;
+  const m = M(r), mf = r.manifest, world = DATA.worlds[r.task_key];
+  box.append(el("h2", {}, `Run ${r.run_id}`));
+  const head = el("div", { class: "card" }), facts = el("div", { class: "facts" });
+  fact(facts, "Agent", `${r.agent}: ${DATA.agents[r.agent].llm} / ${r.harness} ${mf.harness_version}`);
+  fact(facts, "Result", m.task_success === 1 ? "✓ success" : `✕ fail: ${m.success_check?.reason ?? "–"}`);
+  fact(facts, "Validity", m.excluded ? `⊘ excluded: ${m.excluded}` : m.valid ? "✓ valid" : `▲ invalid: ${(m.invalid_reasons || []).join("; ")}`);
+  fact(facts, "End condition", mf.end_condition); fact(facts, "Distance to goal", m.distance_to_goal_m === null ? "–" : `${fmt(m.distance_to_goal_m)} m`);
+  fact(facts, "Completion time T", m.completion_time_s === null ? "–" : `${fmt(m.completion_time_s, 1)} s`);
+  fact(facts, "Tool calls", m.tool_calls ? `${m.tool_calls.total} (rejected ${m.tool_calls.rejected}, refused ${m.tool_calls.refused})` : "–");
+  fact(facts, "Safety events", m.safety_events ? `falls ${m.safety_events.falls} · obstacle ${m.safety_events.obstacle} · bumped ${m.safety_events.bumped}` : "–");
+  fact(facts, "Instruction following", m.instruction_following ? "yes (get_state → stand)" : "no");
+  fact(facts, "Cost", `${fmt(m.cost_usd, 4)} USD · ${m.cost_source ?? ""}`); fact(facts, "Real-time factor", fmt(m.real_time_factor, 3));
+  fact(facts, "Harness exit", `code ${mf.harness_exit_code} · within grace: ${mf.harness_exited_in_grace_period}`);
+  fact(facts, "System commit", `${(mf.system_commit || "").slice(0, 8)}${mf.system_uncommitted_changes ? " + uncommitted changes" : ""}`);
+  fact(facts, "Image", `${mf.image?.name} ${(mf.image?.id || "").slice(7, 19)}`);
+  if (r.transcript_check) fact(facts, "Transcript check", `${r.transcript_check.nao_tool_calls} NAO calls · exempt ${JSON.stringify(Object.fromEntries(Object.entries(r.transcript_check.exempt_calls || {}).filter(([, v]) => v)))} · violations ${JSON.stringify(r.transcript_check.violating_calls)}`);
+  head.append(facts); box.append(head);
+
+  const g2 = el("div", { class: "grid2" }), plan = el("div", { class: "card" });
+  plan.append(el("h3", { style: "margin-top:0" }, `Path on the floor plan (${world.task})`));
+  const lg = el("div", { class: "legend" }); [["key", SLOT[r.agent], "path (ground truth), dots every 10 s"], ["txt", "var(--serious)", "■ obstacle / ▲ refused"], ["txt", "var(--critical)", "✕ fall"], ["txt", "var(--good)", "goal surface, success area"]]
+    .forEach(([k, c, t]) => { const s = el("span"); if (k === "key") s.append(el("span", { class: "key", style: `background:${c}` })); s.append(el("span", { style: k === "txt" ? `color:${c}` : "" }, t)); lg.append(s); });
+  plan.append(lg, floorPlan(r, world));
+  if (!r.trajectory.length) plan.append(el("div", { class: "note" }, "No path recorded for this run (recorded from 2026-10-06 14:15 on); only the pose at rest is shown."));
+  const said = el("div", { class: "card" }); said.append(el("h3", { style: "margin-top:0" }, "What the agent said"));
+  r.said.forEach(s => said.append(el("div", { class: "answer" }, `🔊 say: ${s}`)));
+  said.append(el("h3", {}, "Final answer"), el("div", { class: "answer" }, r.answer || "–"));
+  g2.append(plan, said); box.append(g2);
+
+  const tl = el("div", { class: "card" }); tl.append(el("h3", { style: "margin-top:0" }, "Call timeline"));
+  const lg2 = el("div", { class: "legend" }); [["var(--muted)", "ok"], ["var(--serious)", "■ obstacle/bumped · ▲ refused"], ["var(--warning)", "◆ rejected"], ["var(--critical)", "✕ fell / error / fall"]]
+    .forEach(([c, t]) => { const s = el("span"); s.append(el("span", { class: "key", style: `background:${c};height:8px` }), document.createTextNode(t)); lg2.append(s); });
+  tl.append(lg2, timeline(r)); box.append(tl);
+
+  if (r.trajectory.length) { const g3 = el("div", { class: "grid2" }), a = el("div", { class: "card" }), b = el("div", { class: "card" });
+    a.append(el("h3", { style: "margin-top:0" }, "Torso tilt (°)"), lineChart(r, 4, "tilt", "°", 45));
+    b.append(el("h3", { style: "margin-top:0" }, "Heading (°, 0 = east, 90 = north)"), lineChart(r, 3, "heading", "°"));
+    g3.append(a, b); box.append(g3); }
+
+  const ct = el("div", { class: "card" }); ct.append(el("h3", { style: "margin-top:0" }, "Calls (bridge log)"));
+  const t = el("table"), hr = el("tr"); ["#", "t (s)", "Tool", "Arguments", "Outcome", "Result", ""].forEach(h => hr.append(el("th", {}, h))); t.append(hr);
+  r.calls.forEach((c, i) => { const tr = el("tr"), st = callStatus(c);
+    [String(i + 1), `${fmt(c.start, 1)}–${fmt(c.end, 1)}`, c.tool, JSON.stringify(c.args)].forEach(v => tr.append(el("td", {}, v)));
+    tr.append(el("td", { style: st.icon ? `color:${st.color}` : "" }, `${st.icon} ${c.outcome === "ok" ? (c.result?.result ?? "ok") : c.outcome}`));
+    tr.append(el("td", {}, resultSummary(c)));
+    const d = el("details"); d.append(el("summary", {}, "raw"), el("pre", {}, JSON.stringify(c.result ?? c.error, null, 1))); const td = el("td"); td.append(d); tr.append(td);
+    t.append(tr); });
+  if (r.falls.length) r.falls.forEach(f => { const tr = el("tr"); tr.append(el("td", {}, "–"), el("td", {}, fmt(f.t, 1)), el("td", { style: "color:var(--critical)" }, "✕ fall"), el("td", { colspan: 4 }, f.cause)); t.append(tr); });
+  ct.append(t); box.append(ct);
+
+  const im = el("div", { class: "card" }); im.append(el("h3", { style: "margin-top:0" }, `Images the agent received (${r.images.length})`));
+  if (r.harness === "agy") im.append(el("div", { class: "note" }, "agy offloads images to files; the model sees one only when it opens it with view_file (counted in the transcript check)."));
+  const gal = el("div", { class: "gallery" });
+  r.images.forEach((img, i) => { const f = el("figure"), pic = el("img", { src: img.src, loading: "lazy", alt: `image ${i + 1} from ${img.tool}` });
+    pic.addEventListener("click", () => { $("#zoom img").src = img.src; $("#zoom").style.display = "flex"; });
+    f.append(pic, el("figcaption", {}, `#${i + 1} · ${img.tool}`)); gal.append(f); });
+  im.append(gal); box.append(im);
+
+  const raw = el("div", { class: "card" }); raw.append(el("h3", { style: "margin-top:0" }, "Records"));
+  [["Manifest", mf], ["Metrics", m], ["Ground truth", r.ground_truth], ["Cost (OpenCode)", r.cost], ["Transcript check", r.transcript_check]]
+    .forEach(([n, v]) => { if (v === null || v === undefined) return; const d = el("details"); d.append(el("summary", {}, n), el("pre", {}, JSON.stringify(v, null, 1))); raw.append(d); });
+  box.append(raw);
+}
+
+// ---------- checks ----------
+function renderChecks() {
+  const t = $("#checks"); t.replaceChildren(); const hr = el("tr");
+  ["Agent", "Check", "Attempt", "Expected", "Answer", "Result", "NAO calls", "Exempt / violations", "Cost $"].forEach((h, i) => hr.append(el("th", { class: i >= 6 && i !== 7 ? "num" : "" }, h))); t.append(hr);
+  DATA.checks.filter(c => state.agents.has(c.agent)).sort((a, b) => (a.agent + a.check + a.attempt_id).localeCompare(b.agent + b.check + b.attempt_id)).forEach(c => {
+    const tr = el("tr"), a = el("td"); a.append(el("span", { class: "dot", style: `background:${SLOT[c.agent]}` }), document.createTextNode(c.agent)); tr.append(a);
+    [c.check, c.attempt_id.split("-").pop(), c.expected, (c.answer || "").trim().slice(0, 80)].forEach(v => tr.append(el("td", {}, v)));
+    tr.append(el("td", { class: "status " + (c.passed ? "st-good" : "st-crit") }, c.passed ? "✓ pass" : "✕ fail"));
+    tr.append(el("td", { class: "num" }, c.nao_calls ?? "–"), el("td", {}, `${JSON.stringify(c.exempt)} / ${JSON.stringify(c.violations)}`), el("td", { class: "num" }, fmt(c.cost_usd, 4)));
+    t.append(tr); });
+}
+
+// ---------- wiring ----------
+function renderAll() { renderSummary(); stripLegend("#lg-strip"); stripLegend("#lg-strip2");
+  strip("#c-dist", r => M(r).distance_to_goal_m, { ref: DATA.d, refLabel: `success area: d ≤ ${DATA.d} m`, unit: "m", axis: "distance from the goal surface (m)", label: "distance to goal per agent" });
+  strip("#c-time", r => M(r).completion_time_s ?? (M(r).task_success === 1 ? null : null), { unit: "s", digits: 0, axis: "T = t_end − t0 (s); only runs that ended with rest", label: "completion time" });
+  strip("#c-cost", r => M(r).cost_usd, { unit: "USD", digits: 3, axis: "USD per run", label: "cost per run" });
+  strip("#c-calls", r => M(r).tool_calls?.total, { unit: "calls", digits: 0, axis: "tool calls up to the end of the run", label: "tool calls per run" });
+  renderRuns(); renderChecks(); if (state.run) renderDetail(); }
+function init() {
+  $("#gen").textContent = `Generated ${DATA.generated} · ${DATA.runs.length} run folders · ${DATA.checks.length} check attempts · minimum real-time factor ${DATA.min_rtf}`;
+  const ts = $("#f-task"); for (const [k, w] of Object.entries(DATA.worlds)) { const n = DATA.runs.filter(r => r.task_key === k).length; ts.append(el("option", { value: k }, `${w.task} (${n})`)); }
+  state.task = Object.keys(DATA.worlds).find(k => DATA.runs.some(r => r.task_key === k)) || Object.keys(DATA.worlds)[0]; ts.value = state.task;
+  ts.addEventListener("change", () => { state.task = ts.value; state.run = null; $("#detail").replaceChildren(); renderAll(); });
+  [["#f-test", "test"], ["#f-excl", "excl"], ["#f-invalid", "invalid"]].forEach(([s, k]) => $(s).addEventListener("change", e => { state[k] = e.target.checked; renderAll(); }));
+  const ag = $("#f-agents"); AGENT_IDS.forEach(a => { const l = el("label"), c = el("input", { type: "checkbox", checked: "" });
+    c.addEventListener("change", () => { c.checked ? state.agents.add(a) : state.agents.delete(a); renderAll(); });
+    l.append(c, el("span", { class: "dot", style: `background:${SLOT[a]}` }), document.createTextNode(a)); l.title = `${DATA.agents[a].llm} / ${DATA.agents[a].harness}`; ag.append(l); });
+  $("#theme").addEventListener("click", () => { const dark = document.documentElement.dataset.theme === "dark" || (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+    document.documentElement.dataset.theme = dark ? "light" : "dark"; });
+  $("#zoom").addEventListener("click", () => $("#zoom").style.display = "none");
+  renderAll();
+  const m = location.hash.match(/^#run=(.+)$/); if (m) openRun(decodeURIComponent(m[1]));
+}
+init();
+</script>
+</body>
+</html>
