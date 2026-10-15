@@ -129,6 +129,9 @@ def request_settings(request):
     return out
 
 
+SERIES = {"defer_cost": False, "floor": 0.0}  # verify.py all: OpenRouter usage settled once for the whole series
+
+
 def attempt(agent, check, fake, check_dir, when=None):
     spec, config = AGENTS[agent], json.loads(CHECKS.read_text())
     harness = spec["harness"]
@@ -181,7 +184,16 @@ def attempt(agent, check, fake, check_dir, when=None):
         if fake:
             result["reached_model"] = reached_model(cap, word, png)
             shutil.copy(cap / "requests.jsonl", folder / "fake_llm_requests.jsonl")
-        if usage_before is not None:
+        if usage_before is not None and SERIES["defer_cost"]:
+            floor = 0.9 * max(runner.opencode_step_costs(folder / "agent"),
+                              runner.opencode_token_floor(folder / "agent", spec["model"])[0])
+            SERIES["floor"] += floor
+            (folder / "cost.json").write_text(json.dumps({
+                "source": "not settled per attempt: the series' OpenRouter usage is settled once at its end "
+                          "(series-cost-*.json in the checks folder); the attempt's own costs as OpenCode logged them",
+                "settled": False, "waited_s": 0, "settle_floor_usd": round(floor, 8),
+                "cross_check_step_costs_usd": runner.opencode_step_costs(folder / "agent")}, indent=2))
+        elif usage_before is not None:
             floor = 0.9 * max(runner.opencode_step_costs(folder / "agent"),
                               runner.opencode_token_floor(folder / "agent", spec["model"])[0])
             usage_after, waited, settled = runner.settled_usage(container.openrouter_key, usage_before, floor)
@@ -250,8 +262,23 @@ def main():
         for agent in agents:  # refuse before anything is spent
             if agent not in AGENT_IDS or not AGENTS[agent].get("model_id_confirmed"):
                 raise SystemExit("%s: unknown agent or model ID not confirmed" % agent)
+        key = runner.OPENROUTER_KEY.read_text().strip() \
+            if any(AGENTS[a]["harness"] == "opencode" for a in agents) else None
+        if key:
+            SERIES["defer_cost"] = True
+            series_before = runner.openrouter_usage(key)
         summaries = [check_series(a, c, args.when, args.repeat) for a in agents for c in ("instructions", "image")]
         print(json.dumps({"%s %s" % (s["agent"], s["check"]): s["passed"] for s in summaries}, indent=2))
+        if key:
+            # Settle once, so that no usage of the checks can fall into a later run's window on the shared key.
+            print("settling the series' OpenRouter usage", flush=True)
+            after, waited, settled = runner.settled_usage(key, series_before, SERIES["floor"])
+            out = OUT / ("series-cost-%s-%s.json" % (args.when, datetime.datetime.now(datetime.timezone.utc)
+                                                       .strftime("%Y%m%dT%H%M%SZ")))
+            out.write_text(json.dumps({"agents": agents, "usage_before_usd": series_before, "usage_after_usd": after,
+                                       "cost_usd": round(after - series_before, 8), "settled": settled,
+                                       "waited_s": waited, "settle_floor_usd": round(SERIES["floor"], 8)}, indent=2))
+            print(out.read_text())
     else:
         agents = args.agents or list(json.loads(CHECKS.read_text())["standin_agent_per_harness"].values())
         if set(agents) - set(AGENT_IDS):
