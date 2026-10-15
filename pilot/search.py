@@ -135,6 +135,18 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
         raise SystemExit("%s runs come only from the run order (search.py next)" % phase)
     spec, prompt = AGENTS[agent], runner.PROTOCOL["prompts"][TASK]
     caps, grace = dict(runner.PROTOCOL["caps"][TASK]), runner.PROTOCOL["grace_period_s"]["value"]
+    # Before any record exists: a start refused here (battery, robot) is no run and leaves nothing in the records.
+    (runner.INSTRUMENTATION / "run_id").unlink(missing_ok=True)
+    log("starting a fresh bridge connected to the NAO at %s" % nao_ip)
+    bridge_up(nao_ip, simulator_for_test=bool(fake_script))
+    state = robot_state()
+    battery = state.get("battery") or {}
+    log("battery %s %%, charging %s, posture %s" % (battery.get("percent"), battery.get("charging"), state.get("posture")))
+    if battery.get("percent") is None or battery["percent"] < SPEC["min_battery_percent"]:
+        raise SystemExit("battery %s %%: a run starts only at >= %d %% (section 5.1.1); not started, nothing recorded"
+                         % (battery.get("percent"), SPEC["min_battery_percent"]))
+    if battery.get("charging"):
+        log("WARNING: the NAO is charging (cable plugged in); recorded in the manifest")
     started = time.time()
     run_id = "%s-%s-%s" % (TASK, agent, datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
     run_dir = records.runs_dir(phase) / run_id
@@ -170,20 +182,8 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
             raise RuntimeError(invalid)
         if spec["harness"] == "opencode":
             runner.wait_for_pending_costs(agent)
-        (runner.INSTRUMENTATION / "run_id").unlink(missing_ok=True)
-        log("starting a fresh bridge connected to the NAO at %s" % nao_ip)
-        bridge_up(nao_ip, simulator_for_test=bool(fake_script))
-        state = robot_state()
-        battery = state.get("battery") or {}
         manifest["robot_before"] = {"battery": battery, "posture": state.get("posture"), "fallen": state.get("fallen"),
                                     "awake": state.get("awake")}
-        log("battery %s %%, charging %s, posture %s" % (battery.get("percent"), battery.get("charging"),
-                                                        state.get("posture")))
-        if battery.get("percent") is None or battery["percent"] < SPEC["min_battery_percent"]:
-            raise SystemExit("battery %s %%: a run starts only at >= %d %% (section 5.1.1)"
-                             % (battery.get("percent"), SPEC["min_battery_percent"]))
-        if battery.get("charging"):
-            log("WARNING: the NAO is charging (cable plugged in); recorded in the manifest")
         manifest["operator_checklist"] = checklist_given or checklist()
         if spec["harness"] == "opencode" and not fake_script:
             container.openrouter_key = runner.openrouter_key(agent)
