@@ -17,6 +17,12 @@
     "decided": false,
     "value": 30
   },
+  "invalid_if": {
+    "_source": "Section 5.1.3 (Invalid runs): both DECIDE. Proposed: a provider error that remains after the harness's retries makes the run invalid (alternative: a failure, as part of the agent's reliability), and reaching a subscription or account usage limit counts as a provider error. pilot/metrics.py records the two as separate reasons either way.",
+    "decided": false,
+    "provider_error": true,
+    "usage_limit": true
+  },
   "min_real_time_factor": {
     "_source": "Section 5.1.1 (Simulated tasks): proposed 0.9; below it the run is invalid and repeated",
     "decided": false,

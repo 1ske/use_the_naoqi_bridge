@@ -23,9 +23,16 @@ Per run:
     not in the last leg or the corner before it (pilot/success.py, distance_to_goal).
   * valid / invalid_reasons: the runner's reason, if any, a harness that ended with an error before its first model
     turn (agy, Claude Code; OpenCode not handled yet), and a real-time factor below the minimum (protocol.json).
+  * provider_failure: in a run that did not end with rest, the error with which the harness gave up after its own
+    retries, as {"kind", "message"}: kind "usage_limit" (Claude Code: the Claude subscription's limit; agy: the
+    Google account's quota, HTTP 429 RESOURCE_EXHAUSTED) or "provider_error" (any other error from the LLM's service,
+    including OpenRouter's). Whether each kind makes the run invalid is protocol.json's invalid_if (section 5.1.3,
+    still DECIDE); the reasons stay separate in invalid_reasons. Formats checked against the stand-in LLM
+    (pilot/tools/fake_routes/error_*.json), 2026-10-15.
 Aggregation over runs (success rates, medians over successful runs) is not done here.
 """
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -140,6 +147,36 @@ def startup_error(harness, agent_dir):
     return None
 
 
+def provider_failure(harness, agent_dir):
+    """The error from the LLM's service with which the harness ended, after its retries: {"kind", "message"} or None."""
+    events = read_jsonl_lenient(agent_dir / "transcript.jsonl")
+    if harness == "claude-code":
+        # Claude Code ends with an assistant message carrying an error type, and a result with is_error.
+        errors = [e for e in events if e.get("type") == "assistant" and e.get("error")]
+        if not errors or errors[-1]["error"] == "authentication_failed":
+            return None  # a failed login is the startup check's
+        last = errors[-1]
+        text = " ".join(b.get("text", "") for b in (last.get("message") or {}).get("content") or []
+                        if isinstance(b, dict) and b.get("type") == "text")
+        limit = last["error"] == "rate_limit" and re.search(r"hit your .*limit", text, re.I)
+        return {"kind": "usage_limit" if limit else "provider_error", "message": "%s: %s" % (last["error"], text)}
+    if harness == "opencode":
+        errors = [e for e in events if e.get("type") == "error"]
+        if errors:
+            err = errors[-1].get("error") or {}
+            return {"kind": "provider_error", "message": "%s %s: %s" % (err.get("type"), err.get("status"),
+                                                                       err.get("message"))}
+    if harness == "agy":
+        results = [e["result"] for e in events if e.get("event") == "result"]
+        if results and results[-1].get("status") == "ERROR" and results[-1].get("num_turns"):
+            error = str(results[-1].get("error") or "")
+            if "RESOURCE_EXHAUSTED" in error or "Error 429" in error:
+                return {"kind": "usage_limit", "message": error}
+            if re.search(r"generating and executing: Error \d+", error):
+                return {"kind": "provider_error", "message": error}
+    return None
+
+
 def metrics(run_dir):
     run_dir = Path(run_dir)
     manifest = json.loads((run_dir / "manifest.json").read_text())
@@ -177,6 +214,12 @@ def metrics(run_dir):
     error = startup_error(manifest["agent_config"]["harness"], run_dir / "agent")
     if error:
         invalid.append("the harness ended with an error before its first model turn: %s" % error)
+    failure = provider_failure(manifest["agent_config"]["harness"], run_dir / "agent") \
+        if manifest["end_condition"] != "stop_signal" else None
+    if failure and PROTOCOL["invalid_if"][failure["kind"]]:
+        invalid.append({"usage_limit": "usage limit reached: %s",
+                        "provider_error": "provider error after the harness's retries: %s"}[failure["kind"]]
+                       % failure["message"])
     rtf, rtf_min = ground_truth.get("real_time_factor"), PROTOCOL["min_real_time_factor"]["value"]
     if rtf is None:
         invalid.append("no real-time factor recorded")
@@ -188,9 +231,10 @@ def metrics(run_dir):
     at_harness = harness_rejected(manifest["agent_config"]["harness"], run_dir / "agent")
     return {
         "run_id": manifest["run_id"], "agent": manifest["agent"], "task": manifest["task"],
-        "test_run": bool(manifest.get("test")),
+        "task_key": manifest["task_key"], "phase": manifest.get("phase"),
+        "test_run": bool(manifest.get("test")) or manifest.get("phase") == "test",
         "excluded": EXCLUDED.get(manifest["run_id"]),  # a reason when the run is not pilot or main-run data
-        "valid": not invalid, "invalid_reasons": invalid,
+        "valid": not invalid, "invalid_reasons": invalid, "provider_failure": failure,
         "end_condition": manifest["end_condition"],
         "task_success": int(succeeded),
         "success_check": {
