@@ -37,6 +37,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -249,6 +250,32 @@ def opencode_step_costs(agent_dir):
     return round(total, 8)
 
 
+PENDING_COSTS = []  # threads settling earlier OpenCode runs' costs (run(defer_cost=True))
+
+
+def wait_for_pending_costs():
+    """Before an OpenCode run reads the key's usage: every earlier OpenCode run's usage has settled, so that each run's
+    window on the shared key holds only that run."""
+    while PENDING_COSTS:
+        thread = PENDING_COSTS.pop(0)
+        if thread.is_alive():
+            log("waiting for an earlier OpenCode run's cost to settle on OpenRouter")
+        thread.join()
+
+
+def write_opencode_cost(run_dir, key, usage_before):
+    floor = opencode_step_costs(run_dir / "agent")
+    usage_after, waited, settled = settled_usage(key, usage_before, floor)
+    (run_dir / "cost.json").write_text(json.dumps({
+        "source": "OpenRouter /api/v1/key usage of the shared key (A2, A4, A6, A8), after minus before the run",
+        "usage_before_usd": usage_before, "usage_after_usd": usage_after,
+        "cost_usd": round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited,
+        "settle_rule": "unchanged for %d reads %d s apart, after usage - before reached the step costs"
+                       % (USAGE_STABLE_READS, USAGE_POLL),
+        "cross_check_step_costs_usd": floor}, indent=2))
+    log("%s: OpenRouter cost %s" % (run_dir.name, "settled after %d s" % waited if settled else "NOT settled (missing)"))
+
+
 def settled_usage(key, before=None, floor=0.0):
     """The key's usage once it has stopped changing. OpenRouter adds a run's requests to the key's usage minutes after
     them, and the usage stays unchanged meanwhile (2026-10-15: nothing after 150 s, still incomplete after 7 min), so
@@ -285,8 +312,10 @@ def preflight(agent, phase, fake_script):
         raise SystemExit("main runs need a frozen protocol; not decided in protocol.json: %s" % ", ".join(open_values))
 
 
-def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None):
-    """One run. slot: the run order's position (pilot/order.py next_slot) for pilot and main runs."""
+def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None, defer_cost=False):
+    """One run. slot: the run order's position (pilot/order.py next_slot) for pilot and main runs. defer_cost: settle an
+    OpenCode run's cost in a background thread (PENDING_COSTS), so that the next run need not wait unless it is an
+    OpenCode run too (run_next)."""
     preflight(agent, phase, fake_script)
     if phase != "test" and slot is None:
         raise SystemExit("%s runs come only from the run order (run.py next)" % phase)
@@ -332,6 +361,7 @@ def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None):
         supervisor = reset(run_id, world)
         if spec["harness"] == "opencode" and not fake_script:
             container.openrouter_key = OPENROUTER_KEY.read_text().strip()
+            wait_for_pending_costs()
             times["usage_before_read"] = time.time()
             usage_before = openrouter_usage(container.openrouter_key)
         container.bridge = compose(REPO, "ps", "-q", "bridge")
@@ -405,16 +435,15 @@ def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None):
             if (instrumentation / name).exists():
                 shutil.copy(instrumentation / name, run_dir / name)
         if container.openrouter_key:
-            log("waiting for OpenRouter's usage of the key to settle")
-            floor = opencode_step_costs(run_dir / "agent")
-            usage_after, waited, settled = settled_usage(container.openrouter_key, usage_before, floor)
-            (run_dir / "cost.json").write_text(json.dumps({
-                "source": "OpenRouter /api/v1/key usage of the shared key (A2, A4, A6, A8), after minus before the run",
-                "usage_before_usd": usage_before, "usage_after_usd": usage_after,
-                "cost_usd": round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited,
-                "settle_rule": "unchanged for %d reads %d s apart, after usage - before reached the step costs"
-                               % (USAGE_STABLE_READS, USAGE_POLL),
-                "cross_check_step_costs_usd": floor}, indent=2))
+            if defer_cost:
+                log("OpenRouter cost: settling in the background (the next OpenCode run waits for it)")
+                thread = threading.Thread(target=write_opencode_cost,
+                                          args=(run_dir, container.openrouter_key, usage_before))
+                thread.start()
+                PENDING_COSTS.append(thread)
+            else:
+                log("waiting for OpenRouter's usage of the key to settle")
+                write_opencode_cost(run_dir, container.openrouter_key, usage_before)
         check = transcript_check.check(agent, run_dir / "agent")
         (run_dir / "transcript_check.json").write_text(json.dumps(check, indent=2))
         if not check["transcript_found"] and not invalid:
@@ -448,7 +477,7 @@ def run_next(phase, task, fake_script=None, count=1, stop_after_invalid=1):
             log("every position of the %s order for %s has a valid run" % (phase, task))
             break
         log("position %d (block %d), %s, attempt %d" % (slot["position"], slot["block"], slot["agent"], slot["attempt"]))
-        run_dir = run(slot["agent"], task, phase, slot, fake_script)
+        run_dir = run(slot["agent"], task, phase, slot, fake_script, defer_cost=True)
         done.append(run_dir)
         m = metrics.metrics(run_dir)
         if m["valid"] and not m["excluded"]:
@@ -463,6 +492,7 @@ def run_next(phase, task, fake_script=None, count=1, stop_after_invalid=1):
         if invalid_in_a_row >= stop_after_invalid:
             log("STOP: %d invalid run(s) in a row" % invalid_in_a_row)
             break
+    wait_for_pending_costs()
     return done
 
 
