@@ -422,7 +422,14 @@ def main():
             print(run(args.agent or "A1", "test", args.nao_ip, defer_cost=False, checklist_given=given, chat=True,
                       fake_script=args.fake_llm))
         else:
-            slot = run_order.next_slot(args.phase, TASK)
+            # Skip positions whose run is still being finished (its folder has no manifest yet, e.g. a cost settling).
+            busy = {d.name.split("-")[1] for d in records.runs_dir(args.phase).glob(TASK + "-*")
+                    if not (d / "manifest.json").exists()}
+            order_, rows = run_order.status(args.phase, TASK)
+            slot = next((dict(r, attempt=len(r["attempts"]) + 1, order_seed=order_["seed"]) for r in rows
+                         if not r["done"] and r["agent"] not in busy), None)
+            if busy:
+                log("still being finished: %s (skipped)" % ", ".join(sorted(busy)))
             if slot is None:
                 raise SystemExit("every position of the %s order for Search has a valid run" % args.phase)
             log("position %d (block %d), %s, attempt %d" % (slot["position"], slot["block"], slot["agent"],
