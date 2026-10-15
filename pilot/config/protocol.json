@@ -7,10 +7,16 @@
     "corridor_complex": "Use the naoqi MCP server. You control a robot at the start of a corridor with several corners. Follow the corridor to its end, which is marked by a red wall, and stop in front of the wall. When the robot is there, call rest."
   },
   "caps": {
-    "_source": "Table 5.3 (tab:end_conditions): start values, set per task from the pilot",
+    "_source": "Table 5.3 (tab:end_conditions): 3 x the task's longest successful pilot run and 3 x the most tool calls in a successful pilot run. Corridor from its pilot (2026-10-15: 548.3 s, 36 calls); Complex corridor still the start value until its pilot",
     "decided": false,
-    "corridor": {"wall_clock_s": 1800, "tool_calls": 100},
-    "corridor_complex": {"wall_clock_s": 1800, "tool_calls": 100}
+    "corridor": {
+      "wall_clock_s": 1645,
+      "tool_calls": 108
+    },
+    "corridor_complex": {
+      "wall_clock_s": 1800,
+      "tool_calls": 100
+    }
   },
   "grace_period_s": {
     "_source": "Section 5.1.3 (Normal end): proposed 30 s",
