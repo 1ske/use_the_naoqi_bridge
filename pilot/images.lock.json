@@ -1,19 +1,19 @@
 {
-  "built_at": "2026-10-15T08:05:48+00:00",
-  "built_from_commit": "fc3ffa4ca855ce0d2051ab154c81f4e013ccdc0f",
+  "built_at": "2026-10-15T09:06:40+00:00",
+  "built_from_commit": "fedc390373df7e2850eff914e9d204ad5b859e6b",
   "uncommitted_changes_in_image_sources": false,
   "images": {
-    "naoqi-pilot/base": "sha256:b16b323eba5d007abf3af90c03e68328e87d5c364cb311ef69f2e80e36788e43",
-    "naoqi-pilot/claude": "sha256:a7f0b57ab7566a149da364a69850f8b1aab543365f3e187f464cd0b668fe93e1",
-    "naoqi-pilot/opencode": "sha256:be56aee26f8598805aa076445a06b138585735581385cc278cc1f3ecb278cc2e",
-    "naoqi-pilot/agy": "sha256:3f597140079b0204693a7d70129e8cc59288848098b8cc289a80d63dc1a1bec7",
-    "naoqi-pilot/proxy": "sha256:8431627d1e2d94d308f0e216a1a51cc01d45d22c4ce784a512cddcf1001ad8d2",
-    "naoqi-pilot/claude-verify": "sha256:26fd104936a5bba59c60580325aded39b23d038ec7545755cc3706345c97ffe0",
-    "naoqi-pilot/opencode-verify": "sha256:25ce1bc364ec9fb171b1b97f21a2c92f7d3b476afc3a63b662e75e57c1c5a27b",
-    "naoqi-pilot/agy-verify": "sha256:758ff34282dd53ba53dfbef9cbd83189b7e75873f6154c87d905b34687199b2e"
+    "naoqi-pilot/base": "sha256:5472196f6a2efecd6fb12ab94b46466a8f2f29f0cde1069142f5b880f0684e8f",
+    "naoqi-pilot/claude": "sha256:c2a7c916bb94c781108424ea4aebd49db5c34e498b9a7d069c0ab53e103af1b8",
+    "naoqi-pilot/opencode": "sha256:57faea26608cc4100af619449679cd585fd3b8fc3a3f19b391c239950128a621",
+    "naoqi-pilot/agy": "sha256:b93e1c2edc385d15c97792f31fa5c5056ea259126ac2cdb6c685870fd7a11517",
+    "naoqi-pilot/proxy": "sha256:027532265caf9d758ea0768c03706b6863649c37668fb3390630487503c0f12d",
+    "naoqi-pilot/claude-verify": "sha256:491c7ff2322b55fcfcf4f180b80942cf2b1bd1d1a9bde6f7cb13274e84bbd6b0",
+    "naoqi-pilot/opencode-verify": "sha256:26264aad208e368d8b3d81ef8cca63e80c8dc546878a79389008556695c8fc12",
+    "naoqi-pilot/agy-verify": "sha256:bce6b7c3b23e3788d09568331fe3db1e229f75384890b33d0c692c0f4acf1d81"
   },
   "harness_versions": {
-    "claude": "2.1.280",
+    "claude": "2.1.295",
     "opencode": "2.0.21",
     "agy": "1.2.17"
   },
