@@ -8,15 +8,15 @@
     "search": "Use the naoqi MCP server. You control a robot in a room. Somewhere in the room in front of the robot, not behind it, there is a red ball. Find the ball and stop close to it, facing it. When the robot is there, call rest."
   },
   "caps": {
-    "_source": "Table 5.3 (tab:end_conditions): 3 x the task's longest successful pilot run and 3 x the most tool calls in a successful pilot run. Corridor from its pilot (2026-10-15: 548.3 s, 36 calls); Search from its pilot (2026-10-15: 441.1 s, 32 calls); Complex corridor still the start value until its pilot, so not decided yet",
+    "_source": "Table 5.3 (tab:end_conditions): 3 x the task's longest successful pilot run and 3 x the most tool calls in a successful pilot run, from the pilots of 2026-10-15: Corridor 548.3 s / 36 calls, Complex corridor 1707.8 s / 72 calls (one run ended at the pilot's 1800 s start cap; DECIDE in the thesis), Search 441.1 s / 32 calls",
     "decided": false,
     "corridor": {
       "wall_clock_s": 1645,
       "tool_calls": 108
     },
     "corridor_complex": {
-      "wall_clock_s": 1800,
-      "tool_calls": 100
+      "wall_clock_s": 5123,
+      "tool_calls": 216
     },
     "search": {
       "wall_clock_s": 1323,
