@@ -73,6 +73,17 @@ USAGE_FIRST_READ, USAGE_POLL, USAGE_STABLE_READS, USAGE_MAX_WAIT = 60, 10, 3, 12
 T0_TIMEOUT = 120  # s from container start; OpenCode alone waits up to 60 s for the MCP server
 
 
+def clear_run_id(run_id):
+    """Remove the bridge's run ID only if it is this run's: another runner's run may be going (2026-10-15: an earlier
+    Search run's process, finishing its OpenRouter cost, removed the next run's ID and cut its call log)."""
+    path = INSTRUMENTATION / "run_id"
+    try:
+        if path.read_text().strip() == run_id:
+            path.unlink()
+    except FileNotFoundError:
+        pass
+
+
 def log(message):
     print("%s %s" % (datetime.datetime.now().strftime("%H:%M:%S"), message), file=sys.stderr, flush=True)
 
@@ -447,7 +458,7 @@ def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None, 
         times["end_detected"] = time.time()
         # End of the run: the supervisor takes the real-time factor, and the bridge stops logging.
         write_atomic(instrumentation / "end", "%.6f\n" % times["end_detected"])
-        (INSTRUMENTATION / "run_id").unlink(missing_ok=True)
+        clear_run_id(run_id)
         log("end: %s%s" % (end, " (invalid: %s)" % invalid if invalid else ""))
         exited_in_grace = None
         if end == "stop_signal" and container.running():
@@ -490,7 +501,7 @@ def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None, 
         manifest.update({"end_condition": end or "runner_error", "invalid_reason": "runner error: %r" % e})
         raise
     finally:
-        (INSTRUMENTATION / "run_id").unlink(missing_ok=True)
+        clear_run_id(run_id)
         container.remove()
         if supervisor is not None:
             stop_supervisor(supervisor)

@@ -252,7 +252,7 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
             else:
                 time.sleep(runner.POLL)
         times["end_detected"] = time.time()
-        (runner.INSTRUMENTATION / "run_id").unlink(missing_ok=True)
+        runner.clear_run_id(run_id)
         if end == "stop_signal":
             print("\n\a*** REST: the robot is crouching where the agent stopped it. Do not touch it; judge it now. ***\n")
         log("end: %s%s" % (end, " (invalid: %s)" % invalid if invalid else ""))
@@ -307,7 +307,7 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
                          "invalid_reason": invalid or "runner error: %r" % e})
         raise
     finally:
-        (runner.INSTRUMENTATION / "run_id").unlink(missing_ok=True)
+        runner.clear_run_id(run_id)
         container.remove()
         manifest["runner_times_mac_clock"] = {k: runner.utc(v) for k, v in dict(times, runner_started=started).items()}
         (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
