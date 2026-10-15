@@ -81,56 +81,56 @@
     "image": "naoqi-pilot/claude",
     "llm": "Claude Sonnet 5.5",
     "model": "claude-sonnet-5-5",
-    "model_id_confirmed": false,
-    "model_id_note": "TODO(author): ID as listed in Anthropic's model table and OpenRouter's catalogue (2026-10-15), not yet confirmed by the author; the runner refuses non-test runs until model_id_confirmed is true",
+    "model_id_confirmed": true,
     "access_route": "Claude subscription login (claude setup-token, CLAUDE_CODE_OAUTH_TOKEN), no API key; shared by A1, A3 and A5, and so are its usage limits",
     "reasoning": "--effort medium (sent as output_config.effort = medium)",
     "proxy_allow": [
       "^api\\.anthropic\\.com$"
     ],
-    "deviations_ref": "claude-code"
+    "deviations_ref": "claude-code",
+    "model_id_source": "confirmed by the author 2026-10-15; listed by the Claude subscription's /v1/models and OpenRouter's catalogue"
   },
   "A4": {
     "harness": "opencode",
     "image": "naoqi-pilot/opencode",
     "llm": "Claude Sonnet 5.5",
     "model": "anthropic/claude-sonnet-5.5",
-    "model_id_confirmed": false,
-    "model_id_note": "TODO(author): ID as listed in Anthropic's model table and OpenRouter's catalogue (2026-10-15), not yet confirmed by the author; the runner refuses non-test runs until model_id_confirmed is true",
+    "model_id_confirmed": true,
     "access_route": "OpenRouter, provider 'anthropic' only, allow_fallbacks false",
     "reasoning": "reasoning.effort = medium in every request body",
     "proxy_allow": [
       "^openrouter\\.ai$"
     ],
-    "deviations_ref": "opencode"
+    "deviations_ref": "opencode",
+    "model_id_source": "confirmed by the author 2026-10-15; listed by the Claude subscription's /v1/models and OpenRouter's catalogue"
   },
   "A5": {
     "harness": "claude-code",
     "image": "naoqi-pilot/claude",
     "llm": "Claude Haiku 5.5",
     "model": "claude-haiku-5-5",
-    "model_id_confirmed": false,
-    "model_id_note": "TODO(author): ID as listed in Anthropic's model table and OpenRouter's catalogue (2026-10-15), not yet confirmed by the author; the runner refuses non-test runs until model_id_confirmed is true",
+    "model_id_confirmed": true,
     "access_route": "Claude subscription login (claude setup-token, CLAUDE_CODE_OAUTH_TOKEN), no API key; shared by A1, A3 and A5, and so are its usage limits",
     "reasoning": "--effort medium (sent as output_config.effort = medium)",
     "proxy_allow": [
       "^api\\.anthropic\\.com$"
     ],
-    "deviations_ref": "claude-code"
+    "deviations_ref": "claude-code",
+    "model_id_source": "confirmed by the author 2026-10-15; listed by the Claude subscription's /v1/models and OpenRouter's catalogue"
   },
   "A6": {
     "harness": "opencode",
     "image": "naoqi-pilot/opencode",
     "llm": "Claude Haiku 5.5",
     "model": "anthropic/claude-haiku-5.5",
-    "model_id_confirmed": false,
-    "model_id_note": "TODO(author): ID as listed in Anthropic's model table and OpenRouter's catalogue (2026-10-15), not yet confirmed by the author; the runner refuses non-test runs until model_id_confirmed is true",
+    "model_id_confirmed": true,
     "access_route": "OpenRouter, provider 'anthropic' only, allow_fallbacks false",
     "reasoning": "reasoning.effort = medium in every request body",
     "proxy_allow": [
       "^openrouter\\.ai$"
     ],
-    "deviations_ref": "opencode"
+    "deviations_ref": "opencode",
+    "model_id_source": "confirmed by the author 2026-10-15; listed by the Claude subscription's /v1/models and OpenRouter's catalogue"
   },
   "A7": {
     "harness": "agy",
@@ -243,6 +243,10 @@
       },
       {
         "what": "Network: only api.anthropic.com reachable; all other hosts (e.g. telemetry) blocked"
+      },
+      {
+        "what": "Claude Code 2.1.295 (the version on the author's Mac on 2026-10-15) instead of 2.1.280: 2.1.280 does not know Claude Haiku 5.5 and reports its cost at Sonnet's price",
+        "approved": "2026-10-15"
       }
     ],
     "agy": [
