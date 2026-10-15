@@ -429,11 +429,12 @@ def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None):
     return run_dir
 
 
-def run_next(phase, task, fake_script=None, count=1):
-    """Up to count runs from the run order, one position after the other; stops at the first invalid run, so that the
-    operator sees why before the position is repeated (and a usage limit is not hit again right away)."""
+def run_next(phase, task, fake_script=None, count=1, stop_after_invalid=1):
+    """Up to count runs from the run order. An invalid run leaves its position open, so the next run repeats it.
+    Stops after stop_after_invalid invalid runs in a row (default 1: the operator sees why first), and at once when
+    a usage limit was reached, so that the limit is not hit again right away."""
     import metrics
-    done = []
+    done, invalid_in_a_row = [], 0
     for _ in range(count):
         slot = run_order.next_slot(phase, task)
         if slot is None:
@@ -443,9 +444,17 @@ def run_next(phase, task, fake_script=None, count=1):
         run_dir = run(slot["agent"], task, phase, slot, fake_script)
         done.append(run_dir)
         m = metrics.metrics(run_dir)
-        if not m["valid"] or m["excluded"]:
-            log("invalid run (%s); position %d stays open" % ("; ".join(m["invalid_reasons"]) or m["excluded"],
-                                                             slot["position"]))
+        if m["valid"] and not m["excluded"]:
+            invalid_in_a_row = 0
+            continue
+        invalid_in_a_row += 1
+        log("invalid run (%s); position %d stays open" % ("; ".join(m["invalid_reasons"]) or m["excluded"],
+                                                         slot["position"]))
+        if (m["provider_failure"] or {}).get("kind") == "usage_limit":
+            log("STOP: usage limit reached")
+            break
+        if invalid_in_a_row >= stop_after_invalid:
+            log("STOP: %d invalid run(s) in a row" % invalid_in_a_row)
             break
     return done
 
@@ -456,7 +465,9 @@ if __name__ == "__main__":
     p_next = sub.add_parser("next", help="the next run(s) of a phase's run order")
     p_next.add_argument("phase", choices=records.PHASES)
     p_next.add_argument("task", choices=list(WORLDS["worlds"]))
-    p_next.add_argument("--count", type=int, default=1, help="runs in a row (stops at the first invalid run)")
+    p_next.add_argument("--count", type=int, default=1, help="runs in a row")
+    p_next.add_argument("--stop-after-invalid", type=int, default=1, metavar="K",
+                        help="stop after K invalid runs in a row (each is repeated in place); a usage limit always stops")
     p_next.add_argument("--fake-llm", metavar="SCRIPT", help="test order only: play the stand-in LLM")
     p_run = sub.add_parser("run", help="one test run outside any order (phase test)")
     p_run.add_argument("agent", choices=AGENT_IDS)
@@ -467,7 +478,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # clean up (container, run ID) when killed
     if args.cmd == "next":
-        for path in run_next(args.phase, args.task, args.fake_llm, args.count):
+        for path in run_next(args.phase, args.task, args.fake_llm, args.count, args.stop_after_invalid):
             print(path)
     else:
         test_caps = None
