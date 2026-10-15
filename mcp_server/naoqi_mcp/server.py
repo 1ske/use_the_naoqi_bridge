@@ -34,8 +34,8 @@ CALL_TIMEOUT = 400.0    # s; the bridge bounds every movement itself (go <= ~110
 INSTRUCTIONS = """\
 Controls a NAO robot (simulated or real).
 - Start with get_state, then stand.
-- Every result includes a camera image (top: ahead, bottom: at the feet; yellow lines = ground
-  distance in m). Use it to choose where to go; look_around shows the sides.
+- Every result includes a camera image (top: ahead, bottom: at the feet). Use it to choose where
+  to go; look_around shows the sides.
 - go turns and walks; walk_to is for small corrections and sidesteps.
 - Results say what actually happened (result, odometry, state): trust them over your plan.
   obstacle or bumped means something is in the way.

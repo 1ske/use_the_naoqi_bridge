@@ -19,7 +19,7 @@ and trusts none of the arguments it receives:
   when a foot bumper gets pressed
 - `go` turns, then walks straight up to GO_MAX_DISTANCE m
 - camera images: every successful result carries one JPEG with the top view above the bottom view
-  ("images", --auto-image) and ground-distance lines (--image-grid); `look` grabs it without moving,
+  ("images", --auto-image); `look` grabs it without moving,
   `look_around` turns the head (clamped, joint speed <= MAX_JOINT_SPEED) and returns one panorama;
   a missing camera only warns
 - one movement at a time; rest always runs and interrupts it
@@ -63,8 +63,6 @@ CAMERA_NAME = "use_the_naoqi_bridge_camera"
 CAMERAS = {"top": 0, "bottom": 1}   # kTopCamera, kBottomCamera
 K_QVGA, K_RGB, CAMERA_FPS = 1, 11, 5  # naoqisim only fills QVGA buffers (VGA comes back solid green)
 JPEG_QUALITY = 90
-GRID_M = {"top": (0.5, 1.0, 1.5, 2.0, 3.0), "bottom": (0.25, 0.5, 0.75, 1.0)}
-FRAME_ROBOT = 2
 HEAD_JOINTS = ["HeadYaw", "HeadPitch"]
 HEAD_YAW_MAX = 2.0                  # rad (joint limit 2.09)
 HEAD_PITCH_MIN, HEAD_PITCH_MAX = -0.6, 0.5  # rad, positive looks down (joint limits -0.67 / 0.51)
@@ -74,7 +72,6 @@ SWEEP_YAWS = (1.6, 0.8, 0.0, -0.8, -1.6)  # rad; 61 deg FOV each, so about +-150
 GO_MAX_DISTANCE = 3.0               # m per go
 SHORT_M, SHORT_RAD = 0.05, 0.1      # a completed walk this much short of the command was stopped by NAOqi
 MAX_SAY_CHARS = 300                 # per say call
-HFOV = 1.064                        # rad, NAO V5 cameras (Webots Nao.proto uses the same)
 AUTONOMY_MODULES = ("ALAutonomousLife", "ALBasicAwareness", "ALAutonomousMoves")
 AUTONOMY_CHECK_PERIOD = 2.0         # s between the monitor's checks that autonomy stayed off
 
@@ -82,7 +79,6 @@ D = "Device/SubDeviceList/"
 BATTERY_KEY = D + "Battery/Charge/Sensor/Value"  # 0..1; ALBattery.getBatteryCharge() is 0 in naoqisim
 BATTERY_CURRENT_KEY = D + "Battery/Current/Sensor/Value"  # A, positive while charging
 SONAR_KEYS = [D + "US/Left/Sensor/Value", D + "US/Right/Sensor/Value"]
-TILT_KEYS = [D + "InertialSensor/AngleX/Sensor/Value", D + "InertialSensor/AngleY/Sensor/Value"]
 BUMPER_KEYS = [D + "LFoot/Bumper/Left/Sensor/Value", D + "LFoot/Bumper/Right/Sensor/Value",
                D + "RFoot/Bumper/Left/Sensor/Value", D + "RFoot/Bumper/Right/Sensor/Value"]
 FALLEN_FAMILIES = ("LyingBack", "LyingBelly", "LyingLeft", "LyingRight", "Back", "Belly", "Left", "Right")
@@ -317,54 +313,18 @@ class Lease(object):
         return self.timeout > 0 and not self.fired and time.time() - self.last > self.timeout
 
 
-def upright(pose, tilt):
-    """The camera pose in FRAME_ROBOT comes from the joints alone, assuming flat feet: only trust it
-    (ground lines, free-space measurements) when the IMU (tilt = torso roll, pitch) agrees."""
-    return not (guard.fallen or pose[2] < 0.2 or abs(pose[3]) > 0.2 or abs(tilt[0]) > 0.25
-                or abs(tilt[1]) > 0.35)
-
-
-def grid_row(distance, size, pose):
-    """Image row of the floor `distance` m ahead of the camera (pose in FRAME_ROBOT), straight ahead."""
-    width, height = size
-    focal = (width / 2.0) / math.tan(HFOV / 2)
-    return height / 2.0 + focal * math.tan(math.atan2(pose[2], distance) - pose[4])
-
-
-def draw_grid(image, distances, pose):
-    """Draw a line where the ground is d m ahead of the camera, for each d. Returns the distances drawn."""
-    width, rows = image.size
-    draw = ImageDraw.Draw(image)
-    drawn = []
-    for distance in distances:
-        row = grid_row(distance, image.size, pose)
-        if not 0 <= row < rows:
-            continue
-        draw.line([(0, row), (width, row)], fill=(255, 230, 0))
-        label = "%gm" % distance
-        draw.text((3, row - 11), label, fill=(0, 0, 0))
-        draw.text((2, row - 12), label, fill=(255, 230, 0))
-        drawn.append(distance)
-    return drawn
-
-
 class Frame(object):
-    """One camera image (PIL, no drawing on it) with the camera pose in FRAME_ROBOT when it was taken."""
+    """One camera image (PIL, no drawing on it) with the head angles when it was taken."""
 
-    def __init__(self, camera, image, pose, head, upright):
-        self.camera, self.image, self.pose, self.head, self.upright = camera, image, pose, head, upright
+    def __init__(self, camera, image, head):
+        self.camera, self.image, self.head = camera, image, head
 
-    def tile(self, grid):
-        """(a copy with the ground lines drawn, metadata)."""
-        image = self.image.copy()
-        meta = {"camera": self.camera, "direction": direction(self.head[0]),
+    def meta(self):
+        return {"camera": self.camera, "direction": direction(self.head[0]),
                 "head": {"yaw": rounded(self.head[0]), "pitch": rounded(self.head[1])}}
-        if grid and self.upright:
-            meta["grid_m"] = draw_grid(image, GRID_M[self.camera], self.pose)
-        return image, meta
 
 
-def compose(rows, grid):
+def compose(rows):
     """One JPEG view from rows of Frames (all the same size): {"layout", "tiles", "mime_type", "data"}.
     Each tile is labelled with its camera and direction."""
     width, height = rows[0][0].image.size
@@ -373,8 +333,8 @@ def compose(rows, grid):
     tiles = []
     for r, row in enumerate(rows):
         for c, frame in enumerate(row):
-            image, meta = frame.tile(grid)
-            sheet.paste(image, (c * width, r * height))
+            meta = frame.meta()
+            sheet.paste(frame.image, (c * width, r * height))
             label = "%s %s" % (frame.camera, meta["direction"])
             draw.rectangle([c * width, r * height, c * width + 7 * len(label) + 4, r * height + 12], fill=(0, 0, 0))
             draw.text((c * width + 2, r * height + 1), label, fill=(255, 255, 255))
@@ -386,8 +346,6 @@ def compose(rows, grid):
     view = {"layout": "%d x %d tiles of %dx%d px, left to right = left to right"
                       % (len(rows), max(len(row) for row in rows), width, height),
             "tiles": tiles, "mime_type": "image/jpeg", "data": base64.b64encode(buf.getvalue())}
-    if any(meta.get("grid_m") for meta in tiles):
-        view["grid"] = "yellow lines: ground this far (m) ahead of the camera"
     return view
 
 
@@ -426,10 +384,8 @@ class Camera(object):
             width, height, data = raw[0], raw[1], raw[6]
             if data == data[:3] * (len(data) // 3):  # naoqisim -nocam (or VGA) hands back solid green
                 raise RuntimeError("blank frame (one colour): naoqisim is probably running with -nocam")
-            motion = p["ALMotion"]
-            pose = motion.getPosition("Camera" + name.capitalize(), FRAME_ROBOT, True)
-            frame = Frame(name, Image.frombytes("RGB", (width, height), bytes(data)), pose,
-                          motion.getAngles(HEAD_JOINTS, True), upright(pose, p["ALMemory"].getListData(TILT_KEYS)))
+            frame = Frame(name, Image.frombytes("RGB", (width, height), bytes(data)),
+                          p["ALMotion"].getAngles(HEAD_JOINTS, True))
             self.last_error = None
             return frame
         except Exception as e:
@@ -504,7 +460,7 @@ def read_battery(p):
 def view_of(p, names=("top", "bottom")):
     """(one composed view of the named cameras stacked top to bottom or None, all frames there)."""
     frames = [frame for frame in (camera.frame(p, name) for name in names) if frame]
-    return (compose([[frame] for frame in frames], camera.args.image_grid) if frames else None,
+    return (compose([[frame] for frame in frames]) if frames else None,
             len(frames) == len(names))
 
 
@@ -802,7 +758,7 @@ def panorama(columns):
     """One view: the top frames left to right in the first row, the bottom frames below them."""
     rows = [[frames[i] for frames in columns if frames[i]] for i in (0, 1)]
     rows = [row for row in rows if row]
-    return [compose(rows, camera.args.image_grid)] if rows else []
+    return [compose(rows)] if rows else []
 
 
 @primitive("look_around")
@@ -1262,9 +1218,6 @@ def main():
         parser.add_argument("--auto-image", type=int, choices=(0, 1),
                             default=int(os.environ.get("BRIDGE_AUTO_IMAGE", 1)),
                             help="attach top + bottom camera images to every successful result (1 = on)")
-        parser.add_argument("--image-grid", type=int, choices=(0, 1),
-                            default=int(os.environ.get("BRIDGE_IMAGE_GRID", 1)),
-                            help="draw ground-distance lines on camera images (1 = on)")
         parser.add_argument("--max-step-x", type=float,
                             default=float(os.environ.get("BRIDGE_MAX_STEP_X", 0.06)),
                             help="gait step length (m); NAOqi's default is 0.04, its maximum 0.08")
@@ -1295,11 +1248,9 @@ def main():
         thread = threading.Thread(target=target, args=targs)
         thread.daemon = True
         thread.start()
-    log("bridge listening on %s:%d, primitives: %s, client timeout %.0f s, auto image %s, "
-        "grid %s, move config %s"
+    log("bridge listening on %s:%d, primitives: %s, client timeout %.0f s, auto image %s, move config %s"
         % (args.listen, args.listen_port, ", ".join(sorted(server.registry)), args.client_timeout,
-           "on" if args.auto_image else "off", "on" if args.image_grid else "off",
-           move_config))
+           "on" if args.auto_image else "off", move_config))
     while not shutting_down.is_set():
         time.sleep(0.2)
 

@@ -88,12 +88,11 @@ Every successful result also carries one image taken after the command finished 
 top (ahead) camera view above the bottom (feet) one; `look_around` returns one panorama
 instead. One image per result matters: some clients (Antigravity) make the model open every image
 with a separate tool call. The MCP server turns it into MCP image content, so the model sees
-the picture and the JSON keeps only the metadata (`images_meta`). Yellow lines on each image mark
-where the ground is 0.25–3 m ahead of the camera, computed from the camera's height and pitch
-(`ALMotion.getPosition("CameraTop", FRAME_ROBOT)`). They're skipped when the robot isn't upright.
+the picture and the JSON keeps only the metadata (`images_meta`). The bridge draws nothing on the
+camera images except a label with the camera and head direction on each tile.
 A QVGA frame costs the model about 100 tokens. `BRIDGE_AUTO_IMAGE=0` limits images to
-`look`/`look_around`, and `BRIDGE_IMAGE_GRID=0` drops the lines. naoqisim only fills QVGA buffers, so the
-bridge always asks for QVGA, on a real NAO too.
+`look`/`look_around`. naoqisim only fills QVGA buffers, so the bridge always asks for QVGA, on a
+real NAO too.
 
 ### Adding a primitive
 

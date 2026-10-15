@@ -14,7 +14,7 @@
     {
       "name": "look",
       "kind": "read",
-      "description": "Fresh camera image without moving: the top camera (ahead) above the bottom camera (at the feet). Yellow lines mark ground distance in m.",
+      "description": "Fresh camera image without moving: the top camera (ahead) above the bottom camera (at the feet).",
       "params": {
         "type": "object",
         "properties": {

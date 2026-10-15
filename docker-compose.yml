@@ -31,7 +31,6 @@ services:
       NAO_IP: ${NAO_IP:-host.docker.internal}
       BRIDGE_CLIENT_TIMEOUT: ${BRIDGE_CLIENT_TIMEOUT:-20}  # rest if awake and no client request for this long
       BRIDGE_AUTO_IMAGE: ${BRIDGE_AUTO_IMAGE:-1}  # 1: every result carries one image (top above bottom camera), 0: only look/look_around/scan
-      BRIDGE_IMAGE_GRID: ${BRIDGE_IMAGE_GRID:-1}  # 1: ground-distance lines on camera images
       BRIDGE_MAX_STEP_X: ${BRIDGE_MAX_STEP_X:-0.06}  # gait step length (m); NAOqi default 0.04, max 0.08
       PYTHONUNBUFFERED: "1"
     stop_signal: SIGTERM
