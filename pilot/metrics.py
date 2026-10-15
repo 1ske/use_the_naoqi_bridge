@@ -210,6 +210,9 @@ def metrics(run_dir):
     notes = json.loads(notes_file.read_text()) if notes_file.exists() else {}
     if search:
         verdict = notes.get("verdict") if normal_end else None
+        if verdict:  # recomputed from the recorded facts under the current criteria (protocol.json, search)
+            verdict = dict(verdict, success=bool(verdict["within_distance"] and (
+                verdict["ball_visible_in_rest_image"] or not PROTOCOL["search"]["require_ball_visible_in_rest_image"])))
     else:
         verdict = success.verdict(manifest["task_key"], ground_truth) if normal_end else None
     succeeded = bool(verdict and verdict["success"]) and not check["protocol_violation"]

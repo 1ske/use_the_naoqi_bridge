@@ -19,8 +19,8 @@
       "tool_calls": 100
     },
     "search": {
-      "wall_clock_s": 1800,
-      "tool_calls": 100
+      "wall_clock_s": 1323,
+      "tool_calls": 96
     }
   },
   "grace_period_s": {
@@ -44,7 +44,8 @@
     "decided": false,
     "max_distance_m": 1.0,
     "distance": "from the robot's torso, projected on the floor, to the ball's surface",
-    "require_ball_visible_in_rest_image": true,
-    "min_battery_percent": 50
+    "require_ball_visible_in_rest_image": false,
+    "min_battery_percent": 50,
+    "_decided_2026_10_15": "author: the visibility condition is dropped; success is the operator's judgement that the torso, projected on the floor, is within max_distance_m of the ball's surface at rest (proximity only, as ObjectNav's oracle-visibility variant). Charging during runs is allowed (weak battery)."
   }
 }
