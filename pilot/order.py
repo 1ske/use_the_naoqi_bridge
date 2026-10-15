@@ -5,16 +5,18 @@
     python3 pilot/order.py verify PHASE TASK                      -> redraws the order from its seed and compares
 
 Each block has one run of every agent on one task, in an order drawn with random.Random(seed).sample, one draw per
-block. Restricted randomization (decided by the author 2026-10-15): a draw in which an OpenCode run (A2, A4, A6, A8)
-directly follows another OpenCode run, also across the boundary between two blocks, is rejected and drawn again, so
-that every OpenCode run is followed by at least one run that does not use the shared OpenRouter key, during which the
-previous OpenCode run's cost settles (pilot/run.py). The seed is drawn with secrets.randbits(64) unless given, and is
+block. The seed is drawn with secrets.randbits(64) unless given, and is
 stored in the order file with the Python version, so that the order can be redrawn.
 
     python3 pilot/order.py redraw-open PHASE TASK --keep-through N --reason TEXT
 
-redraws the positions after N (which must all be open) with a new seed under the same rule, keeping positions 1..N;
-the previous order file is kept as TASK.rev<k>.json and the revision is recorded in the new file.
+redraws the positions after N (which must all be open) with a new seed, keeping positions 1..N; the previous order
+file is kept as TASK.rev<k>.json and the revision is recorded in the new file.
+
+History: from 2026-10-15 12:21 until the end of that day's Corridor pilot, orders were drawn with a restriction
+(no OpenCode run directly after another, also across blocks; METHOD_RESTRICTED), while all OpenCode agents shared one
+OpenRouter key. With one key per OpenCode agent the restriction was dropped (author, 2026-10-15); `verify` still
+checks order files drawn with it.
 
 The runner (pilot/run.py next) takes the first position that has no valid run yet. An invalid run is repeated in the
 same position; every attempt keeps its own run folder, and its manifest records the position and the attempt number.
@@ -40,9 +42,11 @@ WORLDS = json.loads((REPO / "pilot" / "config" / "worlds.json").read_text())
 
 
 OPENROUTER = {a for a in AGENT_IDS if AGENTS[a]["harness"] == "opencode"}
-METHOD = ("randomized complete blocks, restricted: per block, random.Random(seed).sample of the block's agents not yet "
-          "placed, drawn again while an OpenCode agent directly follows another (also across blocks); blocks drawn "
-          "one after the other from the same generator")
+METHOD_RESTRICTED = ("randomized complete blocks, restricted: per block, random.Random(seed).sample of the block's agents "
+                     "not yet placed, drawn again while an OpenCode agent directly follows another (also across blocks); "
+                     "blocks drawn one after the other from the same generator")
+METHOD = ("randomized complete blocks: per block, random.Random(seed).sample of the block's agents not yet placed; "
+          "blocks drawn one after the other from the same generator")
 
 
 def allowed(previous, sequence):
@@ -61,9 +65,9 @@ def draw_unrestricted(seed, agents, blocks):
     return order
 
 
-def draw(seed, agents, blocks, fixed=()):
+def draw(seed, agents, blocks, fixed=(), restricted=False):
     """The order: fixed (a list of {"position", "block", "agent"}) first, then the rest of its block and the following
-    blocks, drawn under the restriction."""
+    blocks (with restricted: no OpenCode run directly after another; only to verify orders drawn so)."""
     rng = random.Random(seed)
     order = [dict(x) for x in fixed]
     first_block = order[-1]["block"] if order else 1
@@ -73,7 +77,7 @@ def draw(seed, agents, blocks, fixed=()):
         previous = order[-1]["agent"] if order else None
         for _ in range(100000):
             candidate = rng.sample(rest, len(rest))
-            if allowed(previous, candidate):
+            if not restricted or allowed(previous, candidate):
                 break
         else:
             raise RuntimeError("no allowed order for block %d" % block)
@@ -215,8 +219,9 @@ def main():
     elif args.cmd == "verify":
         order = load(args.phase, args.task)
         kept = order["revisions"][-1]["kept_positions"] if order.get("revisions") else 0
-        if order["method"] == METHOD:
-            same = draw(order["seed"], order["agents"], order["blocks"], order["order"][:kept]) == order["order"]
+        if order["method"] in (METHOD, METHOD_RESTRICTED):
+            same = draw(order["seed"], order["agents"], order["blocks"], order["order"][:kept],
+                        restricted=order["method"] == METHOD_RESTRICTED) == order["order"]
         else:
             same = draw_unrestricted(order["seed"], order["agents"], order["blocks"]) == order["order"]
         print("the order file matches its seed" if same else "MISMATCH: the order file does not match its seed")
