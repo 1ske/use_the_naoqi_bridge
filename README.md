@@ -98,7 +98,7 @@ real NAO too.
 
 1. Add an entry to `src/primitives.json` with these fields:
    - `name`
-   - `kind` (`read` / `move` / `override`)
+   - `kind` (`read` / `action` / `move` / `override`, as described under Primitives)
    - `description` (written for the LLM: units, limits, when to use it)
    - `params`, a JSON Schema object. The supported subset is `type` (number/integer/string/boolean),
      `required`, `enum` and `additionalProperties: false`.
