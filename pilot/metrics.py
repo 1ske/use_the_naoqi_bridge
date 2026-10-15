@@ -13,7 +13,7 @@ Per run:
     run (the cap-th call; calls received before t0 + the wall-clock cap), or all logged calls for other ends, plus
     the calls the harness itself rejected for invalid arguments before they reached the MCP server (from the
     transcript, before the first rest). Rejected (invalid arguments, at the harness or the bridge) and refused (a
-    safety rule or busy) also counted separately.
+    safety rule or busy) also counted separately, and the bridge's calls per tool (by_tool; descriptive only).
   * cost_usd: from the harness's own report (pilot/config/agents.json, cost_sources); None when it is missing.
   * safety_events: falls, and obstacle and bumped outcomes, in the same window as tool_calls. Interventions apply
     to Search only.
@@ -210,6 +210,8 @@ def metrics(run_dir):
             "rejected": sum(c["outcome"] == "rejected" for c in calls) + (at_harness or 0),
             "rejected_by_harness": at_harness,  # None: not handled for this harness yet
             "refused": sum(c["outcome"] == "refused" for c in calls),
+            # calls that reached the bridge, per tool (harness-rejected calls are only in rejected_by_harness)
+            "by_tool": {t: sum(c["tool"] == t for c in calls) for t in sorted({c["tool"] for c in calls})},
         },
         "cost_usd": cost, "cost_source": cost_source,
         "safety_events": {
