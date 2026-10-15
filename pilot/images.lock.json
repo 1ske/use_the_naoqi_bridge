@@ -1,20 +1,21 @@
 {
-  "built_at": "2026-10-06T09:56:23+00:00",
-  "built_from_commit": "4713eb6c51952456d5479160b6cad12ee7257edd",
+  "built_at": "2026-10-15T08:05:48+00:00",
+  "built_from_commit": "fc3ffa4ca855ce0d2051ab154c81f4e013ccdc0f",
   "uncommitted_changes_in_image_sources": false,
   "images": {
-    "naoqi-pilot/base": "sha256:20f0905f0a904cace743a6092d8eb6168df1de60c590d4cd6cb297b37927eecd",
-    "naoqi-pilot/claude": "sha256:fed16c9338ad52a6096eaa016c02070e4bd66deeb87b7a342b648fc038c3eff1",
-    "naoqi-pilot/opencode": "sha256:05a68809b6a025aaa4f098441385ef7f2be42b0b2abae22c2d6726749dc4947f",
-    "naoqi-pilot/agy": "sha256:283fae5f7fc0b06813745388b48874733327c9b1d5215e01836fc857c169b780",
-    "naoqi-pilot/proxy": "sha256:51bf421e74e9b436ae4d275f31a0f5505382f8553cc95dd34a3553d6bf3b34f5",
-    "naoqi-pilot/claude-verify": "sha256:3322c5235081534eaea0d025872b7736ec24e00dafcfba62f72bb897f9b6d1d8",
-    "naoqi-pilot/opencode-verify": "sha256:a3ddeaac810b3d619201f87a0b304c4de4e2cf77ff6db1024e8f426bd92280f7",
-    "naoqi-pilot/agy-verify": "sha256:7d5793ba801366f4ceb4a3af2e4ab407dda2ee99113b92bb3e74d811acba7410"
+    "naoqi-pilot/base": "sha256:b16b323eba5d007abf3af90c03e68328e87d5c364cb311ef69f2e80e36788e43",
+    "naoqi-pilot/claude": "sha256:a7f0b57ab7566a149da364a69850f8b1aab543365f3e187f464cd0b668fe93e1",
+    "naoqi-pilot/opencode": "sha256:be56aee26f8598805aa076445a06b138585735581385cc278cc1f3ecb278cc2e",
+    "naoqi-pilot/agy": "sha256:3f597140079b0204693a7d70129e8cc59288848098b8cc289a80d63dc1a1bec7",
+    "naoqi-pilot/proxy": "sha256:8431627d1e2d94d308f0e216a1a51cc01d45d22c4ce784a512cddcf1001ad8d2",
+    "naoqi-pilot/claude-verify": "sha256:26fd104936a5bba59c60580325aded39b23d038ec7545755cc3706345c97ffe0",
+    "naoqi-pilot/opencode-verify": "sha256:25ce1bc364ec9fb171b1b97f21a2c92f7d3b476afc3a63b662e75e57c1c5a27b",
+    "naoqi-pilot/agy-verify": "sha256:758ff34282dd53ba53dfbef9cbd83189b7e75873f6154c87d905b34687199b2e"
   },
   "harness_versions": {
     "claude": "2.1.280",
     "opencode": "2.0.21",
     "agy": "1.2.17"
-  }
+  },
+  "harness_versions_source": "--version of each built image"
 }
