@@ -306,19 +306,42 @@ def opencode_token_floor(agent_dir, model):
 def write_opencode_cost(run_dir, key, usage_before, model):
     steps = opencode_step_costs(run_dir / "agent")
     tokens, price = opencode_token_floor(run_dir / "agent", model)
-    floor = 0.9 * max(steps, tokens)
+    # Only the token counts at the catalogue price: OpenCode's own step costs overstated the billed cost for Sonnet 5.5
+    # and Gemini 3.8 Flash (and are 0 for Haiku 5.5) in the Search pilot, 2026-10-15, so they could not be reached.
+    floor = 0.9 * tokens
     usage_after, waited, settled = settled_usage(key, usage_before, floor)
     (run_dir / "cost.json").write_text(json.dumps({
         "source": "OpenRouter /api/v1/key usage of the agent's own key (agents.json openrouter_key_file), after minus "
                   "before the run",
         "usage_before_usd": usage_before, "usage_after_usd": usage_after,
         "cost_usd": round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited,
-        "settle_rule": "unchanged for %d reads %d s apart, after usage - before reached the floor: 0.9 x the larger of "
-                       "OpenCode's per-request costs and the token counts at OpenRouter's catalogue prices"
+        "settle_rule": "unchanged for %d reads %d s apart, after usage - before reached the floor: 0.9 x the token "
+                       "counts at OpenRouter's catalogue prices"
                        % (USAGE_STABLE_READS, USAGE_POLL),
         "settle_floor_usd": round(floor, 8), "cross_check_step_costs_usd": steps,
         "cross_check_tokens_at_catalogue_price_usd": tokens, "catalogue_price_per_token": price}, indent=2))
     log("%s: OpenRouter cost %s" % (run_dir.name, "settled after %d s" % waited if settled else "NOT settled (missing)"))
+
+
+def resettle(run_dir):
+    """Read a run's OpenRouter cost again when it did not settle in time, if the agent's key has not been used since
+    (no later run of the agent has read its usage): then usage - before is still this run's alone."""
+    run_dir = Path(run_dir)
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    agent, cost = manifest["agent"], json.loads((run_dir / "cost.json").read_text())
+    if cost.get("settled"):
+        return log("%s: already settled" % run_dir.name)
+    end = manifest["runner_times_mac_clock"]["harness_stopped"]
+    for other in Path(records.STUDY).glob("*/runs/*/manifest.json"):
+        o = json.loads(other.read_text())
+        before = (o.get("runner_times_mac_clock") or {}).get("usage_before_read")
+        if o.get("agent") == agent and other.parent != run_dir and before and before > end:
+            raise SystemExit("%s: %s's key was used again by %s; this cost stays missing" % (run_dir.name, agent, o["run_id"]))
+    first = dict(cost)
+    write_opencode_cost(run_dir, openrouter_key(agent), cost["usage_before_usd"], manifest["agent_config"]["model"])
+    new = json.loads((run_dir / "cost.json").read_text())
+    new["resettled"] = {"at": utc(time.time()), "first_attempt": first}
+    (run_dir / "cost.json").write_text(json.dumps(new, indent=2))
 
 
 def settled_usage(key, before=None, floor=0.0):
@@ -552,6 +575,8 @@ if __name__ == "__main__":
     p_next.add_argument("--stop-after-invalid", type=int, default=1, metavar="K",
                         help="stop after K invalid runs in a row (each is repeated in place); a usage limit always stops")
     p_next.add_argument("--fake-llm", metavar="SCRIPT", help="test order only: play the stand-in LLM")
+    p_re = sub.add_parser("resettle", help="read a missing OpenRouter cost again (if the key was not used since)")
+    p_re.add_argument("run_dirs", nargs="+")
     p_run = sub.add_parser("run", help="one test run outside any order (phase test)")
     p_run.add_argument("agent", choices=AGENT_IDS)
     p_run.add_argument("task", choices=list(WORLDS["worlds"]))
@@ -560,7 +585,10 @@ if __name__ == "__main__":
                        "or wall_clock_s=20")
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # clean up (container, run ID) when killed
-    if args.cmd == "next":
+    if args.cmd == "resettle":
+        for d in args.run_dirs:
+            resettle(d)
+    elif args.cmd == "next":
         for path in run_next(args.phase, args.task, args.fake_llm, args.count, args.stop_after_invalid):
             print(path)
     else:

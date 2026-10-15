@@ -185,8 +185,7 @@ def attempt(agent, check, fake, check_dir, when=None):
             result["reached_model"] = reached_model(cap, word, png)
             shutil.copy(cap / "requests.jsonl", folder / "fake_llm_requests.jsonl")
         if usage_before is not None and SERIES["defer_cost"]:
-            floor = 0.9 * max(runner.opencode_step_costs(folder / "agent"),
-                              runner.opencode_token_floor(folder / "agent", spec["model"])[0])
+            floor = 0.9 * runner.opencode_token_floor(folder / "agent", spec["model"])[0]
             SERIES["floor"][agent] = SERIES["floor"].get(agent, 0.0) + floor
             (folder / "cost.json").write_text(json.dumps({
                 "source": "not settled per attempt: each key's usage in the series is settled once at its end "
@@ -194,8 +193,7 @@ def attempt(agent, check, fake, check_dir, when=None):
                 "settled": False, "waited_s": 0, "settle_floor_usd": round(floor, 8),
                 "cross_check_step_costs_usd": runner.opencode_step_costs(folder / "agent")}, indent=2))
         elif usage_before is not None:
-            floor = 0.9 * max(runner.opencode_step_costs(folder / "agent"),
-                              runner.opencode_token_floor(folder / "agent", spec["model"])[0])
+            floor = 0.9 * runner.opencode_token_floor(folder / "agent", spec["model"])[0]
             usage_after, waited, settled = runner.settled_usage(container.openrouter_key, usage_before, floor)
             (folder / "cost.json").write_text(json.dumps({
                 "source": "OpenRouter /api/v1/key usage of the agent's own key, after minus before the attempt",
