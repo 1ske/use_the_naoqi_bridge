@@ -4,7 +4,8 @@
     "_source": "Table 5.2 (tab:prompts); wording not yet frozen",
     "decided": false,
     "corridor": "Use the naoqi MCP server. You control a robot at the start of a corridor. Follow the corridor to its end, which is marked by a green panel, and stop in front of the panel. When the robot is there, call rest.",
-    "corridor_complex": "Use the naoqi MCP server. You control a robot at the start of a corridor with several corners. Follow the corridor to its end, which is marked by a red wall, and stop in front of the wall. When the robot is there, call rest."
+    "corridor_complex": "Use the naoqi MCP server. You control a robot at the start of a corridor with several corners. Follow the corridor to its end, which is marked by a red wall, and stop in front of the wall. When the robot is there, call rest.",
+    "search": "Use the naoqi MCP server. You control a robot in a room. Somewhere in the room in front of the robot, not behind it, there is a red ball. Find the ball and stop close to it, facing it. When the robot is there, call rest."
   },
   "caps": {
     "_source": "Table 5.3 (tab:end_conditions): 3 x the task's longest successful pilot run and 3 x the most tool calls in a successful pilot run. Corridor from its pilot (2026-10-15: 548.3 s, 36 calls); Complex corridor still the start value until its pilot",
@@ -14,6 +15,10 @@
       "tool_calls": 108
     },
     "corridor_complex": {
+      "wall_clock_s": 1800,
+      "tool_calls": 100
+    },
+    "search": {
       "wall_clock_s": 1800,
       "tool_calls": 100
     }
@@ -33,5 +38,13 @@
     "_source": "Section 5.1.1 (Simulated tasks): proposed 0.9; below it the run is invalid and repeated",
     "decided": false,
     "value": 0.9
+  },
+  "search": {
+    "_source": "Section 5.1.1 (Search, Success criteria): judged by the operator at the moment of rest and from the image of rest's tool result. DECIDE: how proximity is measured; DECIDE: keep the visibility condition. Section 5.1.1: a run starts only with the battery at 50 % or more.",
+    "decided": false,
+    "max_distance_m": 1.0,
+    "distance": "from the robot's torso, projected on the floor, to the ball's surface",
+    "require_ball_visible_in_rest_image": true,
+    "min_battery_percent": 50
   }
 }

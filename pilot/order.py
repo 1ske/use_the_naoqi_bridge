@@ -39,6 +39,7 @@ import records  # noqa: E402
 from agent_container import AGENT_IDS, AGENTS  # noqa: E402
 
 WORLDS = json.loads((REPO / "pilot" / "config" / "worlds.json").read_text())
+TASKS = list(WORLDS["worlds"]) + ["search"]  # search: the physical NAO (pilot/search.py)
 
 
 OPENROUTER = {a for a in AGENT_IDS if AGENTS[a]["harness"] == "opencode"}
@@ -87,7 +88,7 @@ def draw(seed, agents, blocks, fixed=(), restricted=False):
 
 
 def new(phase, task, blocks, seed=None):
-    if task not in WORLDS["worlds"]:
+    if task not in TASKS:
         raise SystemExit("unknown task %r" % task)
     path = records.order_file(phase, task)
     if path.exists():
@@ -198,19 +199,19 @@ def main():
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("new")
     p.add_argument("phase", choices=records.PHASES)
-    p.add_argument("task", choices=list(WORLDS["worlds"]))
+    p.add_argument("task", choices=TASKS)
     p.add_argument("--blocks", type=int, required=True, help="runs per agent on this task")
     p.add_argument("--seed", type=int)
     p = sub.add_parser("redraw-open")
     p.add_argument("phase", choices=records.PHASES)
-    p.add_argument("task", choices=list(WORLDS["worlds"]))
+    p.add_argument("task", choices=TASKS)
     p.add_argument("--keep-through", type=int, required=True)
     p.add_argument("--reason", required=True)
     p.add_argument("--seed", type=int)
     for name in ("status", "verify"):
         p = sub.add_parser(name)
         p.add_argument("phase", choices=records.PHASES)
-        p.add_argument("task", choices=list(WORLDS["worlds"]))
+        p.add_argument("task", choices=TASKS)
     args = parser.parse_args()
     if args.cmd == "new":
         print(new(args.phase, args.task, args.blocks, args.seed))

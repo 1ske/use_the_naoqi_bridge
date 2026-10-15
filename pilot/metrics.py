@@ -205,7 +205,13 @@ def metrics(run_dir):
     check_file = run_dir / "transcript_check.json"  # missing when the runner was stopped before collecting
     check = json.loads(check_file.read_text()) if check_file.exists() else {"protocol_violation": False,
                                                                              "transcript_found": False}
-    verdict = success.verdict(manifest["task_key"], ground_truth) if normal_end else None
+    search = manifest["task_key"] == "search"
+    notes_file = run_dir / "operator_notes.json"  # Search: the operator's interventions and verdict (pilot/search.py)
+    notes = json.loads(notes_file.read_text()) if notes_file.exists() else {}
+    if search:
+        verdict = notes.get("verdict") if normal_end else None
+    else:
+        verdict = success.verdict(manifest["task_key"], ground_truth) if normal_end else None
     succeeded = bool(verdict and verdict["success"]) and not check["protocol_violation"]
 
     invalid = [manifest["invalid_reason"]] if manifest.get("invalid_reason") else []
@@ -221,7 +227,12 @@ def metrics(run_dir):
                         "provider_error": "provider error after the harness's retries: %s"}[failure["kind"]]
                        % failure["message"])
     rtf, rtf_min = ground_truth.get("real_time_factor"), PROTOCOL["min_real_time_factor"]["value"]
-    if rtf is None:
+    if search:
+        if notes.get("invalid_reason"):
+            invalid.append("operator: %s" % notes["invalid_reason"])
+        if normal_end and not invalid and not notes.get("verdict"):
+            invalid.append("verdict pending" if notes.get("verdict_pending") else "no verdict recorded by the operator")
+    elif rtf is None:
         invalid.append("no real-time factor recorded")
     elif rtf < rtf_min:
         invalid.append("real-time factor %.3f below %.2f" % (rtf, rtf_min))
@@ -239,6 +250,13 @@ def metrics(run_dir):
         "task_success": int(succeeded),
         "success_check": {
             "ended_with_rest": normal_end,
+            "protocol_violation": check["protocol_violation"],
+            "operator_verdict": verdict,
+            "reason": ("operator: within %s m: %s, ball visible: %s" % (
+                verdict["criteria"]["max_distance_m"], verdict["within_distance"], verdict["ball_visible_in_rest_image"])
+                if verdict else "the run did not end with rest or has no verdict"),
+        } if search else {
+            "ended_with_rest": normal_end,
             "upright": verdict.get("upright") if verdict else None,
             "inside_area": verdict.get("inside_area") if verdict else None,
             "torso_xy_m": verdict.get("torso_xy") if verdict else None,
@@ -246,7 +264,7 @@ def metrics(run_dir):
             "protocol_violation": check["protocol_violation"],
             "reason": verdict["reason"] if verdict else "the run did not end with rest",
         },
-        "distance_to_goal_m": success.distance_to_goal(manifest["task_key"], verdict["torso_xy"])
+        "distance_to_goal_m": None if search else success.distance_to_goal(manifest["task_key"], verdict["torso_xy"])
         if verdict and verdict.get("torso_xy") else None,
         "completion_time_s": round(rests[0]["returned"] - t0, 3) if normal_end and t0 is not None else None,
         "tool_calls": {
@@ -262,7 +280,7 @@ def metrics(run_dir):
             "falls": len(falls),
             "obstacle": outcomes.count("obstacle"),
             "bumped": outcomes.count("bumped"),
-            "interventions": None,  # Search only
+            "interventions": len(notes.get("interventions") or []) if search else None,  # Search only
         },
         "instruction_following": [c["tool"] for c in calls[:2]] == ["get_state", "stand"],
         "real_time_factor": rtf,
