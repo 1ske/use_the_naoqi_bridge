@@ -316,8 +316,7 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
     return run_dir
 
 
-def cost_marker(agent):
-    return runner.INSTRUMENTATION / ("cost-pending-%s" % agent)
+cost_marker = runner.cost_marker
 
 
 OPERATOR_END = runner.INSTRUMENTATION / "operator_end.json"  # written by `search.py intervene|fault` (chat mode)

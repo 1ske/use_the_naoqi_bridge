@@ -69,7 +69,9 @@ def openrouter_key(agent):
     """The OpenCode agent's own OpenRouter key (agents.json openrouter_key_file; one key per agent since 2026-10-15)."""
     return Path(AGENTS[agent]["openrouter_key_file"]).expanduser().read_text().strip()
 OPENROUTER_KEY_INFO = "https://openrouter.ai/api/v1/key"
-USAGE_FIRST_READ, USAGE_POLL, USAGE_STABLE_READS, USAGE_MAX_WAIT = 60, 10, 3, 1200  # s, s, reads in a row, s
+USAGE_FIRST_READ, USAGE_POLL, USAGE_STABLE_READS, USAGE_MAX_WAIT = 60, 10, 3, 3600  # s, s, reads in a row, s
+# 3600 s: OpenRouter posted some runs' usage more than 35 min late (Haiku 5.5, 2026-10-15). The wait is in the background
+# and only the same agent's next run waits for it (one key per agent), which in a random order is about 8 runs later.
 T0_TIMEOUT = 120  # s from container start; OpenCode alone waits up to 60 s for the MCP server
 
 
@@ -266,9 +268,18 @@ def opencode_step_costs(agent_dir):
 PENDING_COSTS = {}  # agent -> threads settling that agent's earlier runs' costs (run(defer_cost=True))
 
 
+def cost_marker(agent):
+    """Exists while one of the agent's runs' costs is settling, in any runner process (run.py, search.py)."""
+    return INSTRUMENTATION / ("cost-pending-%s" % agent)
+
+
 def wait_for_pending_costs(agent=None):
     """Before an OpenCode run reads its agent's key's usage: that agent's earlier runs' usage has settled, so that the
     run's window on the key holds only that run. agent None: wait for all."""
+    for a in [agent] if agent else []:
+        while cost_marker(a).exists():
+            log("waiting for %s's previous run's cost to settle on OpenRouter (%s)" % (a, cost_marker(a).read_text()))
+            time.sleep(30)
     for a in [agent] if agent else list(PENDING_COSTS):
         threads = PENDING_COSTS.get(a, [])
         while threads:
@@ -505,9 +516,16 @@ def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None, 
                 shutil.copy(instrumentation / name, run_dir / name)
         if container.openrouter_key:
             if defer_cost:
-                log("OpenRouter cost: settling in the background (the next OpenCode run waits for it)")
-                thread = threading.Thread(target=write_opencode_cost,
-                                          args=(run_dir, container.openrouter_key, usage_before, spec["model"]))
+                log("OpenRouter cost: settling in the background (only %s's next run waits for it)" % agent)
+                marker = cost_marker(agent)
+                write_atomic(marker, run_id)
+
+                def settle(key=container.openrouter_key, before=usage_before):
+                    try:
+                        write_opencode_cost(run_dir, key, before, spec["model"])
+                    finally:
+                        marker.unlink(missing_ok=True)
+                thread = threading.Thread(target=settle)
                 thread.start()
                 PENDING_COSTS.setdefault(agent, []).append(thread)
             else:

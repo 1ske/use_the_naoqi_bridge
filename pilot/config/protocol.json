@@ -1,14 +1,14 @@
 {
   "_comment": "Run protocol values from Chapter 5 (evaluation.tex). 'decided': false marks values the chapter still lists as TODO/DECIDE; the runner and the metrics script use them as given here and copy them into every manifest.",
   "prompts": {
-    "_source": "Table 5.2 (tab:prompts); wording not yet frozen",
-    "decided": false,
+    "_source": "Table 5.2 (tab:prompts); frozen (author, 2026-10-15)",
+    "decided": true,
     "corridor": "Use the naoqi MCP server. You control a robot at the start of a corridor. Follow the corridor to its end, which is marked by a green panel, and stop in front of the panel. When the robot is there, call rest.",
     "corridor_complex": "Use the naoqi MCP server. You control a robot at the start of a corridor with several corners. Follow the corridor to its end, which is marked by a red wall, and stop in front of the wall. When the robot is there, call rest.",
     "search": "Use the naoqi MCP server. You control a robot in a room. Somewhere in the room in front of the robot, not behind it, there is a red ball. Find the ball and stop close to it, facing it. When the robot is there, call rest."
   },
   "caps": {
-    "_source": "Table 5.3 (tab:end_conditions): 3 x the task's longest successful pilot run and 3 x the most tool calls in a successful pilot run. Corridor from its pilot (2026-10-15: 548.3 s, 36 calls); Complex corridor still the start value until its pilot",
+    "_source": "Table 5.3 (tab:end_conditions): 3 x the task's longest successful pilot run and 3 x the most tool calls in a successful pilot run. Corridor from its pilot (2026-10-15: 548.3 s, 36 calls); Search from its pilot (2026-10-15: 441.1 s, 32 calls); Complex corridor still the start value until its pilot, so not decided yet",
     "decided": false,
     "corridor": {
       "wall_clock_s": 1645,
@@ -24,24 +24,24 @@
     }
   },
   "grace_period_s": {
-    "_source": "Section 5.1.3 (Normal end): proposed 30 s",
-    "decided": false,
+    "_source": "Section 5.1.3 (Normal end): 30 s (author, 2026-10-15; every harness ended by itself within 17 s in the Corridor and Search pilots)",
+    "decided": true,
     "value": 30
   },
   "invalid_if": {
-    "_source": "Section 5.1.3 (Invalid runs): both DECIDE. Proposed: a provider error that remains after the harness's retries makes the run invalid (alternative: a failure, as part of the agent's reliability), and reaching a subscription or account usage limit counts as a provider error. pilot/metrics.py records the two as separate reasons either way.",
-    "decided": false,
+    "_source": "Section 5.1.3 (Invalid runs), decided by the author 2026-10-15: a provider error that remains after the harness's retries and reaching a subscription or account usage limit both make the run invalid (redone in place); any other failure at the task is a failure. pilot/metrics.py records the two as separate reasons.",
+    "decided": true,
     "provider_error": true,
     "usage_limit": true
   },
   "min_real_time_factor": {
-    "_source": "Section 5.1.1 (Simulated tasks): proposed 0.9; below it the run is invalid and repeated",
-    "decided": false,
+    "_source": "Section 5.1.1 (Simulated tasks): 0.9 (author, 2026-10-15); below it the run is invalid and repeated",
+    "decided": true,
     "value": 0.9
   },
   "search": {
-    "_source": "Section 5.1.1 (Search, Success criteria): judged by the operator at the moment of rest and from the image of rest's tool result. DECIDE: how proximity is measured; DECIDE: keep the visibility condition. Section 5.1.1: a run starts only with the battery at 50 % or more.",
-    "decided": false,
+    "_source": "Section 5.1.1 (Search, Success criteria), decided by the author 2026-10-15: the operator judges at the moment of rest whether the torso, projected on the floor, is within max_distance_m of the ball's surface; the ball need not be visible. A run starts only with the battery at 50 % or more; the robot may stay on its charger, and moving the charger cable is not an intervention.",
+    "decided": true,
     "max_distance_m": 1.0,
     "distance": "from the robot's torso, projected on the floor, to the ball's surface",
     "require_ball_visible_in_rest_image": false,
