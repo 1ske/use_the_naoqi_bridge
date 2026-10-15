@@ -5,6 +5,12 @@ Speaks three APIs, streaming or not:
   Anthropic   POST /v1/messages                                                 (Claude Code with ANTHROPIC_BASE_URL)
   OpenAI      POST .../chat/completions                                         (OpenCode's OpenRouter provider)
 
+A tool step's name "nao:TOOL" becomes the offered tool whose name ends in TOOL (mcp__naoqi__TOOL in Claude Code,
+naoqi_TOOL in OpenCode, mcp_naoqi_TOOL in agy), so one script serves all three harnesses.
+A step {"error": "provider" | "usage_limit"} makes this and every later main request fail with that API's error
+response (provider: HTTP 500; usage_limit: HTTP 429, for Anthropic with the subscription's unified rate-limit headers
+"rejected"), so that the harness's retries and its final error message can be checked (instrumentation tests only).
+
 Every request is recorded to /cap/requests.jsonl. In a step's args, the string "$OFFLOADED" is replaced by the path of
 the last image agy offloaded to a file ("[Resource offloaded to file://PATH]" in the request). A request that offers tools is a "main" request and gets the
 next step of /cap/script.json: {"steps": [{"tool": NAME, "args": {...}} | {"text": "..."}]}; after the last step
@@ -19,7 +25,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SECRET_HEADERS = {"authorization", "x-api-key", "x-goog-api-key", "cookie"}
-state = {"main": 0}
+state = {"main": 0, "error": None}
 
 
 def script():
@@ -27,6 +33,26 @@ def script():
         return json.load(open("/cap/script.json"))["steps"]
     except (OSError, ValueError, KeyError):
         return []
+
+
+def offered_tools(api, body):
+    tools = body.get("tools") or []
+    if api == "gemini":
+        return [d.get("name") for t in tools for d in t.get("functionDeclarations") or []]
+    if api == "openai":
+        return [(t.get("function") or {}).get("name") for t in tools]
+    return [t.get("name") for t in tools]
+
+
+def with_tool_name(step, api, body):
+    """Resolve "nao:TOOL" to the harness's name for the naoqi server's TOOL."""
+    name = step.get("tool") or ""
+    if not name.startswith("nao:"):
+        return step
+    tool = name[4:]
+    match = [t for t in offered_tools(api, body) if t and t in ("mcp__naoqi__" + tool, "naoqi_" + tool,
+                                                                   "mcp_naoqi_" + tool)]
+    return dict(step, tool=match[0] if match else "naoqi_tool_not_offered_" + tool)
 
 
 def with_offloaded(step, raw):
@@ -41,10 +67,14 @@ def with_offloaded(step, raw):
 def next_action(has_tools):
     if not has_tools:
         return {"text": "Side reply"}, {"input": 100000, "output": 7, "thinking": 0}, "side"
+    if state["error"]:  # sticky: every later main request (also the harness's retries) fails the same way
+        return {"error": state["error"]}, {}, "error"
     state["main"] += 1
     i = state["main"]
     steps = script()
     step = steps[i - 1] if i <= len(steps) else {"text": "Done."}
+    if "error" in step:
+        state["error"] = step["error"]
     return step, {"input": 1000 * i, "output": 10 * i, "thinking": i}, "main-%d" % i
 
 
@@ -70,13 +100,15 @@ class Handler(BaseHTTPRequestHandler):
         else:
             api, has_tools = "other", False
         action, usage, label = next_action(has_tools) if api != "other" else ({}, {}, "other")
-        action = with_offloaded(action, raw.decode("utf-8", "replace"))
+        action = with_offloaded(with_tool_name(action, api, body), raw.decode("utf-8", "replace"))
         headers = {k: ("<redacted>" if k.lower() in SECRET_HEADERS else v) for k, v in self.headers.items()}
         with open("/cap/requests.jsonl", "a") as f:
             f.write(json.dumps({"t": time.time(), "label": label, "api": api, "path": path, "headers": headers,
                                 "body": body, "reply": action, "usage": usage}) + "\n")
         if api == "other":
             return self.send_json(404, {"error": {"message": "not a model endpoint"}})
+        if "error" in action:
+            return self.error(api, action["error"])
         stream = body.get("stream", "streamGenerateContent" in path)
         getattr(self, api)(body, action, usage, stream)
 
@@ -102,6 +134,32 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("content-type", "text/event-stream")
         self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def error(self, api, kind):
+        """Each API's own error response for a provider error (500) or a usage limit (429)."""
+        usage_limit = kind == "usage_limit"
+        code, headers = (429 if usage_limit else 500), {}
+        if api == "anthropic":
+            payload = {"type": "error", "error": {"type": "rate_limit_error" if usage_limit else "api_error",
+                                                  "message": "Rate limited" if usage_limit else "Internal server error"}}
+            if usage_limit:  # what the subscription's limit sends (Claude Code reads these headers)
+                headers = {"anthropic-ratelimit-unified-status": "rejected",
+                           "anthropic-ratelimit-unified-reset": str(int(time.time()) + 3 * 3600),
+                           "anthropic-ratelimit-unified-representative-claim": "five_hour",
+                           "anthropic-ratelimit-unified-5h-status": "rejected", "retry-after": "10800"}
+        elif api == "openai":
+            payload = {"error": {"code": code, "message": "Rate limit exceeded" if usage_limit
+                                 else "Provider returned error", "metadata": {"provider_name": "Fake"}}}
+        else:
+            payload = {"error": {"code": code, "message": "Resource has been exhausted (e.g. check quota)."
+                                 if usage_limit else "Internal error encountered.",
+                                 "status": "RESOURCE_EXHAUSTED" if usage_limit else "INTERNAL"}}
+        data = json.dumps(payload).encode()
+        self.send_response(code)
+        for k, v in dict(headers, **{"content-type": "application/json", "content-length": str(len(data))}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(data)
 

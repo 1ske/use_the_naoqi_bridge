@@ -1,0 +1,4 @@
+{
+  "_comment": "Stand-in script (any harness): get_state, then a provider error on every later request, to check how the harness reports it after its retries.",
+  "steps": [{"tool": "nao:get_state", "args": {}}, {"error": "provider"}]
+}

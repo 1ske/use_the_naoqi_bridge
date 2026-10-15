@@ -1,0 +1,11 @@
+{
+  "_comment": "Stand-in script for any harness (tool names resolved by fake_llm.py): get_state, stand, go east 3 m twice, rest. A failed run (stops before the turn); exercises reset, the calls, the end at rest, collection and the figures.",
+  "steps": [
+    {"tool": "nao:get_state", "args": {}},
+    {"tool": "nao:stand", "args": {}},
+    {"tool": "nao:go", "args": {"bearing_deg": 0, "distance_m": 3.0}},
+    {"tool": "nao:go", "args": {"bearing_deg": 0, "distance_m": 3.0}},
+    {"tool": "nao:rest", "args": {}},
+    {"text": "The robot is resting."}
+  ]
+}
