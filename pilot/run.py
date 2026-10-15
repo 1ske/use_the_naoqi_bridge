@@ -1,6 +1,13 @@
 """Runner for one simulated run (section 5.1.3): reset, start, watch for the end, grace period, collect, clean up.
 
-    python3 pilot/run.py AGENT TASK [--position N] [--fake-llm SCRIPT.json]
+    python3 pilot/run.py next PHASE TASK [--count N] [--fake-llm SCRIPT.json]   the next run of the run order
+    python3 pilot/run.py run AGENT TASK [--fake-llm SCRIPT.json] [--test-caps ...] one test run, outside any order
+
+PHASE is test, pilot or main (pilot/records.py); runs go to ~/.naoqi-pilot/grid/PHASE/runs/<run_id>/. Pilot and main
+runs come only from the run order (pilot/order.py): `next` takes the first position without a valid run, so an invalid
+run is repeated in the same position, and every attempt is kept with its position and attempt number. `run` makes a
+test run (phase test). --fake-llm runs are always phase test. Non-test runs need the agent's model ID confirmed in
+pilot/config/agents.json, and main runs need every value in pilot/config/protocol.json decided.
 
 Needs Webots open on the task's world (pilot/config/worlds.json) in real-time mode, with nothing attached to the
 `truth` robot, and Docker. Per run:
@@ -14,9 +21,9 @@ Needs Webots open on the task's world (pilot/config/worlds.json) in real-time mo
      setup component stopping (invalid).
   4. At the end: signal the supervisor and remove the run ID (the bridge stops logging), give the harness the
      grace period after a normal end, stop it, and collect transcript, call log and ground truth into
-     ~/.naoqi-pilot/runs/<run_id>/ with manifest.json and transcript_check.json. Remove the container.
+     ~/.naoqi-pilot/grid/PHASE/runs/<run_id>/ with manifest.json and transcript_check.json. Remove the container.
 
---fake-llm (free tests only, Claude Code agents): the harness talks to pilot/tools/fake_llm.py, which plays the
+--fake-llm (free tests only): the harness talks to pilot/tools/fake_llm.py, which plays the
 script, on the run's internal network. The login is a fake token, the template login is not read, and the proxy
 allows no host, so no request leaves the machine.
 """
@@ -36,12 +43,13 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "pilot"))
+import order as run_order  # noqa: E402
+import records  # noqa: E402
 import transcript_check  # noqa: E402
-from agent_container import AGENTS, AgentContainer, agy_login_ok, docker  # noqa: E402
+from agent_container import AGENT_IDS, AGENTS, AgentContainer, agy_login_ok, docker  # noqa: E402
 
-PILOT_HOME = Path.home() / ".naoqi-pilot"
+PILOT_HOME = records.PILOT_HOME
 INSTRUMENTATION = PILOT_HOME / "instrumentation"
-RUNS = PILOT_HOME / "runs"
 NAOQISIM_DIR = Path(os.environ.get("PILOT_NAOQISIM_DIR", REPO.parent / "NAOQI_ATTEMPT_v1"))
 WEBOTS_HOME = Path(os.environ.get("WEBOTS_HOME", "/Applications/Webots.app"))
 CONTROLLER = WEBOTS_HOME / "Contents" / "MacOS" / "webots-controller"
@@ -56,7 +64,7 @@ HARNESS_KEY = {"claude-code": "claude", "opencode": "opencode", "agy": "agy"}  #
 BRIDGE_HEALTH = "http://127.0.0.1:8765/health"
 SIM_NAOQI = "host.docker.internal:9559"  # naoqisim's published port; a simulated run never uses another NAOqi
 POLL = 0.1
-OPENROUTER_KEY = PILOT_HOME / "templates" / "openrouter" / "api-key"  # shared by A1-A4 (agents.json, cost_sources)
+OPENROUTER_KEY = PILOT_HOME / "templates" / "openrouter" / "api-key"  # shared by A2, A4, A6, A8 (agents.json, cost_sources)
 OPENROUTER_KEY_INFO = "https://openrouter.ai/api/v1/key"
 USAGE_FIRST_READ, USAGE_POLL, USAGE_STABLE_READS, USAGE_MAX_WAIT = 120, 10, 3, 420  # s, s, reads in a row, s
 T0_TIMEOUT = 120  # s from container start; OpenCode alone waits up to 60 s for the MCP server
@@ -259,25 +267,46 @@ def git(*args):
     return subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, text=True).stdout.strip()
 
 
-def run(agent, task, position=None, fake_script=None, test_caps=None):
+def preflight(agent, phase, fake_script):
+    """Refuse a run the protocol does not allow (raises SystemExit)."""
+    if phase not in records.PHASES:
+        raise SystemExit("unknown phase %r" % phase)
+    if fake_script and phase != "test":
+        raise SystemExit("--fake-llm runs are test runs: phase test only")
+    if phase != "test" and not AGENTS[agent].get("model_id_confirmed"):
+        raise SystemExit("%s: the model ID %r is not confirmed by the author (pilot/config/agents.json)"
+                         % (agent, AGENTS[agent]["model"]))
+    open_values = [k for k, v in PROTOCOL.items() if isinstance(v, dict) and v.get("decided") is False]
+    if phase == "main" and open_values:
+        raise SystemExit("main runs need a frozen protocol; not decided in protocol.json: %s" % ", ".join(open_values))
+
+
+def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None):
+    """One run. slot: the run order's position (pilot/order.py next_slot) for pilot and main runs."""
+    preflight(agent, phase, fake_script)
+    if phase != "test" and slot is None:
+        raise SystemExit("%s runs come only from the run order (run.py next)" % phase)
     spec, world = AGENTS[agent], WORLDS["worlds"][task]
     prompt = PROTOCOL["prompts"][task]
     caps, grace = dict(PROTOCOL["caps"][task], **(test_caps or {})), PROTOCOL["grace_period_s"]["value"]
     started = time.time()
     run_id = "%s-%s-%s%s" % (task, agent, datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
                              "-test" if fake_script else "")
-    run_dir = RUNS / run_id
+    run_dir = records.runs_dir(phase) / run_id
     run_dir.mkdir(parents=True)
     instrumentation = INSTRUMENTATION / run_id
     world_file = REPO / world["file"]
     manifest = {
-        "run_id": run_id, "task": world["task"], "task_key": task, "agent": agent, "position_in_run_order": position,
+        "run_id": run_id, "phase": phase, "task": world["task"], "task_key": task, "agent": agent,
+        "run_order": {"file": str(records.order_file(phase, task)), "seed": slot["order_seed"],
+                      "position": slot["position"], "block": slot["block"], "attempt": slot["attempt"]}
+        if slot else None,
         "agent_config": spec, "deviations": AGENTS["deviations"][spec["deviations_ref"]],
         "harness_version": LOCK["harness_versions"][HARNESS_KEY[spec["harness"]]],
         "system_commit": git("rev-parse", "HEAD"), "system_uncommitted_changes": bool(git("status", "--porcelain")),
         "world_file": world["file"], "world_sha256": hashlib.sha256(world_file.read_bytes()).hexdigest(),
         "prompt": prompt, "caps": caps, "grace_period_s": grace,
-        "protocol_values_decided": {k: PROTOCOL[k]["decided"] for k in ("prompts", "caps", "grace_period_s")},
+        "protocol_values_decided": {k: v["decided"] for k, v in PROTOCOL.items() if isinstance(v, dict) and "decided" in v},
         "test": {"fake_llm": True} if fake_script else None,  # completed once the fake LLM has started
     }
     if spec["harness"] in PRICED_MODEL:
@@ -375,7 +404,7 @@ def run(agent, task, position=None, fake_script=None, test_caps=None):
             log("waiting for OpenRouter's usage of the key to settle")
             usage_after, waited, settled = settled_usage(container.openrouter_key)
             (run_dir / "cost.json").write_text(json.dumps({
-                "source": "OpenRouter /api/v1/key usage of the shared A1-A4 key, after minus before the run",
+                "source": "OpenRouter /api/v1/key usage of the shared key (A2, A4, A6, A8), after minus before the run",
                 "usage_before_usd": usage_before, "usage_after_usd": usage_after,
                 "cost_usd": round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited,
                 "cross_check_step_costs_usd": opencode_step_costs(run_dir / "agent")}, indent=2))
@@ -400,22 +429,51 @@ def run(agent, task, position=None, fake_script=None, test_caps=None):
     return run_dir
 
 
+def run_next(phase, task, fake_script=None, count=1):
+    """Up to count runs from the run order, one position after the other; stops at the first invalid run, so that the
+    operator sees why before the position is repeated (and a usage limit is not hit again right away)."""
+    import metrics
+    done = []
+    for _ in range(count):
+        slot = run_order.next_slot(phase, task)
+        if slot is None:
+            log("every position of the %s order for %s has a valid run" % (phase, task))
+            break
+        log("position %d (block %d), %s, attempt %d" % (slot["position"], slot["block"], slot["agent"], slot["attempt"]))
+        run_dir = run(slot["agent"], task, phase, slot, fake_script)
+        done.append(run_dir)
+        m = metrics.metrics(run_dir)
+        if not m["valid"] or m["excluded"]:
+            log("invalid run (%s); position %d stays open" % ("; ".join(m["invalid_reasons"]) or m["excluded"],
+                                                             slot["position"]))
+            break
+    return done
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("agent", choices=[a for a in AGENTS if a.startswith("A")])
-    parser.add_argument("task", choices=list(WORLDS["worlds"]))
-    parser.add_argument("--position", type=int, help="position in the run order")
-    parser.add_argument("--fake-llm", metavar="SCRIPT", help="test run against pilot/tools/fake_llm.py")
-    parser.add_argument("--test-caps", metavar="NAME=VALUE,...", help="test runs only: override the task's caps, "
-                        "e.g. tool_calls=3 or wall_clock_s=20")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    p_next = sub.add_parser("next", help="the next run(s) of a phase's run order")
+    p_next.add_argument("phase", choices=records.PHASES)
+    p_next.add_argument("task", choices=list(WORLDS["worlds"]))
+    p_next.add_argument("--count", type=int, default=1, help="runs in a row (stops at the first invalid run)")
+    p_next.add_argument("--fake-llm", metavar="SCRIPT", help="test order only: play the stand-in LLM")
+    p_run = sub.add_parser("run", help="one test run outside any order (phase test)")
+    p_run.add_argument("agent", choices=AGENT_IDS)
+    p_run.add_argument("task", choices=list(WORLDS["worlds"]))
+    p_run.add_argument("--fake-llm", metavar="SCRIPT", help="test run against pilot/tools/fake_llm.py")
+    p_run.add_argument("--test-caps", metavar="NAME=VALUE,...", help="override the task's caps, e.g. tool_calls=3 "
+                       "or wall_clock_s=20")
     args = parser.parse_args()
-    test_caps = None
-    if args.test_caps:
-        if not args.fake_llm:
-            parser.error("--test-caps is for --fake-llm test runs only")
-        test_caps = {k: int(v) for k, v in (item.split("=") for item in args.test_caps.split(","))}
-        unknown = set(test_caps) - set(PROTOCOL["caps"][args.task])
-        if unknown:
-            parser.error("unknown caps: %s" % ", ".join(sorted(unknown)))
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # clean up (container, run ID) when killed
-    print(run(args.agent, args.task, args.position, args.fake_llm, test_caps))
+    if args.cmd == "next":
+        for path in run_next(args.phase, args.task, args.fake_llm, args.count):
+            print(path)
+    else:
+        test_caps = None
+        if args.test_caps:
+            test_caps = {k: int(v) for k, v in (item.split("=") for item in args.test_caps.split(","))}
+            unknown = set(test_caps) - set(PROTOCOL["caps"][args.task])
+            if unknown:
+                parser.error("unknown caps: %s" % ", ".join(sorted(unknown)))
+        print(run(args.agent, args.task, "test", None, args.fake_llm, test_caps))
