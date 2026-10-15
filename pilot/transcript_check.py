@@ -1,8 +1,9 @@
 """Transcript check, applied after every run (rule fixed 2026-10-05, in pilot/config/agents.json).
 
 A call to any tool other than the 8 NAO tools is a protocol violation, and the run counts as a failure.
-Exception, A6 only: manage_task, list_resources and read_resource, and view_file on an image agy offloaded from a
-tool result, are not violations; they are counted (rule changed 2026-10-06, see agents.json).
+Exception, A7 only (agy): manage_task, list_resources and read_resource, and view_file on an image agy offloaded from a
+tool result or on agy's copy of the server's instructions, are not violations; they are counted (rule changed
+2026-10-06, see agents.json; A7 was A6 before the renumbering of 2026-10-15).
 Every call the transcript records counts, also one that the harness refused or that failed.
 
 Sources: Claude Code's and OpenCode's JSON transcripts (transcript.jsonl). For agy, its own conversation logs

@@ -1,7 +1,12 @@
 """Instruction and image check (section 5.1.5): does the server's instruction text, and does a tool result's image,
 reach the agent's LLM?
 
-    python3 pilot/verify.py AGENT instructions|image [--repeat 3] [--fake-llm]
+    python3 pilot/verify.py check AGENT instructions|image --when before|after [--repeat 3]   (real LLM: costs)
+    python3 pilot/verify.py all --when before|after [--agents A1,A2,...]                     (real LLM: costs)
+    python3 pilot/verify.py standin [AGENT ...]      (free; default one agent per harness, config/checks.json)
+
+`all` runs both checks, `repeat` (3) times each, for every agent (default all eight). --when records whether the check
+is the one before the pilot or the one after the last run (section 5.1.5).
 
 Each attempt starts a fresh container from the agent's verification build (naoqi-pilot/<harness>-verify: the harness
 image with pilot/verify/naoqi_mcp_verify.py, so no robot or bridge is involved), with the agent's login, proxy
@@ -9,10 +14,11 @@ allowlist and settings, and stages a new random word and a new random six-digit 
   * instructions: the word is one line of the server's instructions; the prompt asks for it without calling a tool;
   * image: the code is the image in get_state's result; the prompt asks the agent to call get_state and report it.
 An attempt passes if the agent's final answer contains the word or the code. The check passes if all attempts pass.
-Results go to ~/.naoqi-pilot/checks/<check_id>/ (result.json, the transcript, cost.json for OpenCode).
+Results go to ~/.naoqi-pilot/grid/checks/<check_id>/ (result.json, the transcript, cost.json for OpenCode).
 
---fake-llm (free): the harness talks to pilot/tools/fake_llm.py instead, which cannot read anything; the attempt then
-checks what the harness sent: whether the word appears in a model request, and whether the code image does.
+standin (free): the harness talks to pilot/tools/fake_llm.py instead, which cannot read anything; one image-check
+attempt per agent then shows what the harness sent: whether the word (in the server's instructions) appears in a model
+request, whether the code image does, and the model, reasoning and provider settings of every model request.
 """
 import argparse
 import base64
@@ -31,12 +37,13 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "pilot"))
 import metrics  # noqa: E402
+import records  # noqa: E402
 import run as runner  # noqa: E402
 import transcript_check  # noqa: E402
-from agent_container import AGENTS, AgentContainer, docker  # noqa: E402
+from agent_container import AGENT_IDS, AGENTS, AgentContainer, docker  # noqa: E402
 
 CHECKS = REPO / "pilot" / "config" / "checks.json"
-OUT = runner.PILOT_HOME / "checks"
+OUT = records.CHECKS
 TIMEOUT = 300  # s per attempt
 WORDS = ["amber", "basalt", "cobalt", "delta", "ember", "fjord", "garnet", "harbor", "indigo", "juniper", "kelp",
          "lantern", "marble", "nimbus", "orchid", "pebble", "quartz", "raven", "saffron", "tundra", "umber", "velvet",
@@ -89,8 +96,7 @@ def fake_script(harness, check):
     """What the fake LLM does: call get_state (and open the offloaded image in agy) for the image check."""
     if check == "instructions":
         return {"steps": [{"text": "No answer (fake LLM)."}]}
-    name = AGENTS["transcript_check"]["tool_name_format"][harness].format(tool="get_state")
-    steps = [{"tool": name, "args": {"toolSummary": "Robot state check"} if harness == "agy" else {}}]
+    steps = [{"tool": "nao:get_state", "args": {"toolSummary": "Robot state check"} if harness == "agy" else {}}]
     if harness == "agy":
         steps.append({"tool": "view_file", "args": {"AbsolutePath": "$OFFLOADED", "toolAction": "View image",
                                                     "toolSummary": "Camera image view"}})
@@ -104,10 +110,26 @@ def reached_model(cap, word, png):
     b64 = base64.b64encode(png).decode()
     return {"word_in_a_request": any(word in b for b in bodies),
             "code_image_in_a_request": any(b64[:400] in b for b in bodies),
-            "model_requests": len(bodies)}
+            "model_requests": len(bodies),
+            "request_settings": sorted({json.dumps(request_settings(r), sort_keys=True) for r in requests
+                                        if r.get("api") not in ("other", "get")})}
 
 
-def attempt(agent, check, fake, check_dir):
+def request_settings(request):
+    """The model, reasoning and provider settings of one recorded model request (and whether it offered tools:
+    requests without tools are the harness's side requests, such as the session title)."""
+    body, api = request.get("body") or {}, request.get("api")
+    keep = {"anthropic": ("model", "output_config", "thinking"), "openai": ("model", "reasoning", "provider"),
+            "gemini": ()}[api]
+    out = {k: body.get(k) for k in keep if k in body}
+    if api == "gemini":
+        out["model"] = request.get("path", "").split("/models/")[-1].split(":")[0]
+        out["thinkingConfig"] = (body.get("generationConfig") or {}).get("thinkingConfig")
+    out["api"], out["side_request"] = api, request.get("label") == "side"
+    return out
+
+
+def attempt(agent, check, fake, check_dir, when=None):
     spec, config = AGENTS[agent], json.loads(CHECKS.read_text())
     harness = spec["harness"]
     word = "%s-%s" % (secrets.choice(WORDS), secrets.choice(WORDS))
@@ -121,7 +143,8 @@ def attempt(agent, check, fake, check_dir):
     container = AgentContainer("chk-" + attempt_id.lower(), agent, folder / "agent", image=image,
                                test_env=runner.fake_llm_env(harness) if fake else None,
                                proxy_allow=[r"^no-host-allowed-in-fake-llm-tests\.invalid$"] if fake else None)
-    result = {"check": check, "agent": agent, "attempt_id": attempt_id, "fake_llm": fake, "expected": None,
+    result = {"check": check, "agent": agent, "when": "standin" if fake else when, "attempt_id": attempt_id,
+              "fake_llm": fake, "model": spec["model"], "expected": None,
               "prompt": config["prompts"][check], "image": {"name": image}, "system_commit": runner.git("rev-parse", "HEAD"),
               "system_uncommitted_changes": bool(runner.git("status", "--porcelain")),
               "harness_version": runner.LOCK["harness_versions"][runner.HARNESS_KEY[harness]]}
@@ -161,7 +184,7 @@ def attempt(agent, check, fake, check_dir):
         if usage_before is not None:
             usage_after, waited, settled = runner.settled_usage(container.openrouter_key)
             (folder / "cost.json").write_text(json.dumps({
-                "source": "OpenRouter /api/v1/key usage of the shared A1-A4 key, after minus before the attempt",
+                "source": "OpenRouter /api/v1/key usage of the shared key (A2, A4, A6, A8), after minus before the attempt",
                 "usage_before_usd": usage_before, "usage_after_usd": usage_after,
                 "cost_usd": round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited,
                 "cross_check_step_costs_usd": runner.opencode_step_costs(folder / "agent")}, indent=2))
@@ -179,25 +202,60 @@ def attempt(agent, check, fake, check_dir):
     return result
 
 
+def check_series(agent, check, when, repeat, fake=False):
+    if not fake and not AGENTS[agent].get("model_id_confirmed"):
+        raise SystemExit("%s: the model ID %r is not confirmed by the author (pilot/config/agents.json)"
+                         % (agent, AGENTS[agent]["model"]))
+    check_dir = OUT / ("%s-%s-%s-%s" % (agent, check, "standin" if fake else when,
+                                         datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")))
+    results = []
+    for _ in range(repeat):
+        r = attempt(agent, check, fake, check_dir, when)
+        results.append(r)
+        print(json.dumps({k: r.get(k) for k in ("attempt_id", "expected", "passed", "cost_usd")}
+                         | {"reached_model": {k: v for k, v in (r.get("reached_model") or {}).items()
+                                              if k != "request_settings"}}
+                         | {"answer": (r.get("answer") or "")[:120]}), flush=True)
+    summary = {"agent": agent, "check": check, "when": "standin" if fake else when, "fake_llm": fake,
+               "attempts": len(results), "passed": None if fake else all(r["passed"] for r in results)}
+    if fake:
+        summary["reached_model"] = results[-1].get("reached_model")
+    (check_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+    print(json.dumps(summary, indent=2 if fake else None))
+    return summary
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("agent", choices=[a for a in AGENTS if a.startswith("A")])
-    parser.add_argument("check", choices=["instructions", "image"])
-    parser.add_argument("--repeat", type=int, default=json.loads(CHECKS.read_text())["attempts"])
-    parser.add_argument("--fake-llm", action="store_true")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    attempts = json.loads(CHECKS.read_text())["attempts"]
+    p = sub.add_parser("check", help="one check for one agent (real LLM)")
+    p.add_argument("agent", choices=AGENT_IDS)
+    p.add_argument("check", choices=["instructions", "image"])
+    p.add_argument("--when", choices=["before", "after"], required=True)
+    p.add_argument("--repeat", type=int, default=attempts)
+    p = sub.add_parser("all", help="both checks for every agent (real LLMs)")
+    p.add_argument("--when", choices=["before", "after"], required=True)
+    p.add_argument("--agents", default=",".join(AGENT_IDS))
+    p.add_argument("--repeat", type=int, default=attempts)
+    p = sub.add_parser("standin", help="free: what each harness sends (stand-in LLM)")
+    p.add_argument("agents", nargs="*", metavar="AGENT", help="default: one per harness")
     args = parser.parse_args()
-    check_dir = OUT / ("%s-%s-%s" % (args.agent, args.check,
-                                      datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")))
-    results = []
-    for _ in range(args.repeat):
-        r = attempt(args.agent, args.check, args.fake_llm, check_dir)
-        results.append(r)
-        print(json.dumps({k: r.get(k) for k in ("attempt_id", "expected", "passed", "reached_model", "cost_usd")}
-                         | {"answer": (r.get("answer") or "")[:120]}), flush=True)
-    summary = {"agent": args.agent, "check": args.check, "fake_llm": args.fake_llm, "attempts": len(results),
-               "passed": None if args.fake_llm else all(r["passed"] for r in results)}
-    (check_dir / "summary.json").write_text(json.dumps(summary, indent=2))
-    print(json.dumps(summary))
+    if args.cmd == "check":
+        check_series(args.agent, args.check, args.when, args.repeat)
+    elif args.cmd == "all":
+        agents = args.agents.split(",")
+        for agent in agents:  # refuse before anything is spent
+            if agent not in AGENT_IDS or not AGENTS[agent].get("model_id_confirmed"):
+                raise SystemExit("%s: unknown agent or model ID not confirmed" % agent)
+        summaries = [check_series(a, c, args.when, args.repeat) for a in agents for c in ("instructions", "image")]
+        print(json.dumps({"%s %s" % (s["agent"], s["check"]): s["passed"] for s in summaries}, indent=2))
+    else:
+        agents = args.agents or list(json.loads(CHECKS.read_text())["standin_agent_per_harness"].values())
+        if set(agents) - set(AGENT_IDS):
+            parser.error("unknown agents: %s" % ", ".join(sorted(set(agents) - set(AGENT_IDS))))
+        for agent in agents:
+            check_series(agent, "image", None, 1, fake=True)
 
 
 if __name__ == "__main__":

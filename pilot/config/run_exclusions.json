@@ -1,11 +1,15 @@
 {
-  "_comment": "Runs kept on disk but not part of the pilot or the main runs, with the reason. pilot/metrics.py reports the reason as 'excluded'.",
-  "runs": {
-    "corridor-A6-20261006T090420Z": "configuration test, not pilot data (decided 2026-10-06): A6 ran without view_file, so agy's offloaded tool-result images never reached the model",
-    "corridor-A6-20261006T092718Z": "configuration test, not pilot data (decided 2026-10-06): A6 ran without view_file, so agy's offloaded tool-result images never reached the model",
-    "corridor-A6-20261006T093610Z": "configuration test, not pilot data (decided 2026-10-06): A6 ran without view_file, so agy's offloaded tool-result images never reached the model",
-    "corridor-A6-20261006T093953Z": "configuration test, not pilot data (decided 2026-10-06): A6 ran without view_file, so agy's offloaded tool-result images never reached the model",
-    "corridor-A6-20261006T094206Z": "configuration test, not pilot data (decided 2026-10-06): A6 ran without view_file, so agy's offloaded tool-result images never reached the model",
-    "corridor-A6-20261006T094359Z": "configuration test, not pilot data (decided 2026-10-06): A6 ran without view_file, so agy's offloaded tool-result images never reached the model"
+  "_comment": "Runs of the grid study (~/.naoqi-pilot/grid) kept on disk but not part of the pilot or the main runs, with the reason. pilot/metrics.py reports the reason as 'excluded'; pilot/order.py repeats an excluded run's position. Keys are run IDs, which hold the agent number at the time of the run.",
+  "runs": {},
+  "void_first_pilot": {
+    "_comment": "History only: exclusions of the void first pilot (2026-10-06, ~/.naoqi-pilot/runs), in its old agent numbers (old A6 = agy + Gemini 3.8 Flash, now A7). Not read by any script.",
+    "runs": {
+      "corridor-A6-20261006T090420Z": "configuration test, not pilot data (decided 2026-10-06): A6 ran without view_file, so agy's offloaded tool-result images never reached the model",
+      "corridor-A6-20261006T092718Z": "configuration test, not pilot data (decided 2026-10-06): A6 ran without view_file, so agy's offloaded tool-result images never reached the model",
+      "corridor-A6-20261006T093610Z": "configuration test, not pilot data (decided 2026-10-06): A6 ran without view_file, so agy's offloaded tool-result images never reached the model",
+      "corridor-A6-20261006T093953Z": "configuration test, not pilot data (decided 2026-10-06): A6 ran without view_file, so agy's offloaded tool-result images never reached the model",
+      "corridor-A6-20261006T094206Z": "configuration test, not pilot data (decided 2026-10-06): A6 ran without view_file, so agy's offloaded tool-result images never reached the model",
+      "corridor-A6-20261006T094359Z": "configuration test, not pilot data (decided 2026-10-06): A6 ran without view_file, so agy's offloaded tool-result images never reached the model"
+    }
   }
 }

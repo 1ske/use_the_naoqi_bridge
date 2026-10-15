@@ -1,6 +1,9 @@
 """Static HTML dashboard of everything the pilot has recorded (reads the records, changes nothing).
 
-    python3 pilot/dashboard.py [--out ~/.naoqi-pilot/dashboard]   -> OUT/index.html (+ OUT/images/)
+    python3 pilot/dashboard.py [--phase test|pilot|main] [--out DIR]   -> OUT/index.html (+ OUT/images/)
+
+Shows one phase of the grid study (pilot/records.py; default pilot), never the void first pilot. Default OUT:
+~/.naoqi-pilot/grid/PHASE/dashboard.
 
 Per agent: Table 5.4's metrics over valid runs, the instruction and image check, and strip charts of distance to the
 goal, completion time and cost. Per run: the manifest, the metrics, the robot's path on the floor plan (runs from
@@ -19,11 +22,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "pilot"))
 import metrics  # noqa: E402
+import records  # noqa: E402
 import success  # noqa: E402
 import verify  # noqa: E402
-from agent_container import AGENTS  # noqa: E402
+from agent_container import AGENT_IDS, AGENTS  # noqa: E402
 
-HOME = Path.home() / ".naoqi-pilot"
+HOME = records.STUDY
 WORLDS = json.loads((REPO / "pilot" / "config" / "worlds.json").read_text())
 
 
@@ -130,30 +134,32 @@ def run_record(run_dir, out):
 
 
 def check_records():
-    records = []
-    for f in sorted(glob.glob(str(HOME / "checks" / "*" / "A*" / "result.json"))):
+    out = []
+    for f in sorted(glob.glob(str(records.CHECKS / "*" / "A*" / "result.json"))):
         r = json.loads(Path(f).read_text())
         if r.get("fake_llm"):
             continue
         t = r.get("tool_calls") or {}
-        records.append({k: r.get(k) for k in ("agent", "check", "attempt_id", "expected", "answer", "passed",
+        out.append({k: r.get(k) for k in ("agent", "check", "when", "attempt_id", "expected", "answer", "passed",
                                               "cost_usd", "harness_version", "system_commit")}
                        | {"nao_calls": t.get("nao_tool_calls"), "exempt": {k: v for k, v in (t.get("exempt_calls") or {}).items() if v},
                           "violations": t.get("violating_calls")})
-    return records
+    return out
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out", default=str(HOME / "dashboard"))
+    parser.add_argument("--phase", choices=records.PHASES, default="pilot")
+    parser.add_argument("--out")
     args = parser.parse_args()
-    out = Path(args.out).expanduser()
+    out = Path(args.out or HOME / args.phase / "dashboard").expanduser()
     out.mkdir(parents=True, exist_ok=True)
-    runs = [run_record(d, out) for d in sorted(p.parent for p in (HOME / "runs").glob("*/manifest.json"))]
+    runs = [run_record(d, out) for d in records.runs_of(args.phase)]
     data = {
         "generated": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
-        "agents": {a: {"llm": s["llm"], "harness": s["harness"], "model": s["model"]}
-                   for a, s in AGENTS.items() if a.startswith("A")},
+        "phase": args.phase,
+        "agents": {a: {"llm": AGENTS[a]["llm"], "harness": AGENTS[a]["harness"], "model": AGENTS[a]["model"]}
+                   for a in AGENT_IDS},
         "worlds": {k: world_geometry(k) for k in WORLDS["worlds"]},
         "d": WORLDS["d_default"], "min_rtf": metrics.PROTOCOL["min_real_time_factor"]["value"],
         "runs": runs, "checks": check_records(),
