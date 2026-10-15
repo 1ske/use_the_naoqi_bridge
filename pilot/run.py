@@ -65,7 +65,9 @@ HARNESS_KEY = {"claude-code": "claude", "opencode": "opencode", "agy": "agy"}  #
 BRIDGE_HEALTH = "http://127.0.0.1:8765/health"
 SIM_NAOQI = "host.docker.internal:9559"  # naoqisim's published port; a simulated run never uses another NAOqi
 POLL = 0.1
-OPENROUTER_KEY = PILOT_HOME / "templates" / "openrouter" / "api-key"  # shared by A2, A4, A6, A8 (agents.json, cost_sources)
+def openrouter_key(agent):
+    """The OpenCode agent's own OpenRouter key (agents.json openrouter_key_file; one key per agent since 2026-10-15)."""
+    return Path(AGENTS[agent]["openrouter_key_file"]).expanduser().read_text().strip()
 OPENROUTER_KEY_INFO = "https://openrouter.ai/api/v1/key"
 USAGE_FIRST_READ, USAGE_POLL, USAGE_STABLE_READS, USAGE_MAX_WAIT = 60, 10, 3, 1200  # s, s, reads in a row, s
 T0_TIMEOUT = 120  # s from container start; OpenCode alone waits up to 60 s for the MCP server
@@ -250,17 +252,19 @@ def opencode_step_costs(agent_dir):
     return round(total, 8)
 
 
-PENDING_COSTS = []  # threads settling earlier OpenCode runs' costs (run(defer_cost=True))
+PENDING_COSTS = {}  # agent -> threads settling that agent's earlier runs' costs (run(defer_cost=True))
 
 
-def wait_for_pending_costs():
-    """Before an OpenCode run reads the key's usage: every earlier OpenCode run's usage has settled, so that each run's
-    window on the shared key holds only that run."""
-    while PENDING_COSTS:
-        thread = PENDING_COSTS.pop(0)
-        if thread.is_alive():
-            log("waiting for an earlier OpenCode run's cost to settle on OpenRouter")
-        thread.join()
+def wait_for_pending_costs(agent=None):
+    """Before an OpenCode run reads its agent's key's usage: that agent's earlier runs' usage has settled, so that the
+    run's window on the key holds only that run. agent None: wait for all."""
+    for a in [agent] if agent else list(PENDING_COSTS):
+        threads = PENDING_COSTS.get(a, [])
+        while threads:
+            thread = threads.pop(0)
+            if thread.is_alive():
+                log("waiting for %s's previous run's cost to settle on OpenRouter" % a)
+            thread.join()
 
 
 def opencode_token_floor(agent_dir, model):
@@ -294,7 +298,8 @@ def write_opencode_cost(run_dir, key, usage_before, model):
     floor = 0.9 * max(steps, tokens)
     usage_after, waited, settled = settled_usage(key, usage_before, floor)
     (run_dir / "cost.json").write_text(json.dumps({
-        "source": "OpenRouter /api/v1/key usage of the shared key (A2, A4, A6, A8), after minus before the run",
+        "source": "OpenRouter /api/v1/key usage of the agent's own key (agents.json openrouter_key_file), after minus "
+                  "before the run",
         "usage_before_usd": usage_before, "usage_after_usd": usage_after,
         "cost_usd": round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited,
         "settle_rule": "unchanged for %d reads %d s apart, after usage - before reached the floor: 0.9 x the larger of "
@@ -343,8 +348,8 @@ def preflight(agent, phase, fake_script):
 
 def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None, defer_cost=False):
     """One run. slot: the run order's position (pilot/order.py next_slot) for pilot and main runs. defer_cost: settle an
-    OpenCode run's cost in a background thread (PENDING_COSTS), so that the next run need not wait unless it is an
-    OpenCode run too (run_next)."""
+    OpenCode run's cost in a background thread (PENDING_COSTS), so that only the same agent's next run waits for it
+    (run_next)."""
     preflight(agent, phase, fake_script)
     if phase != "test" and slot is None:
         raise SystemExit("%s runs come only from the run order (run.py next)" % phase)
@@ -388,10 +393,10 @@ def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None, 
             end, invalid = "setup_failure", "the agy login has expired (agy models failed)"
             raise RuntimeError(invalid)
         if spec["harness"] == "opencode" and not fake_script:
-            wait_for_pending_costs()  # before the reset, so that the simulator does not idle at the start pose
+            wait_for_pending_costs(agent)  # before the reset, so that the simulator does not idle at the start pose
         supervisor = reset(run_id, world)
         if spec["harness"] == "opencode" and not fake_script:
-            container.openrouter_key = OPENROUTER_KEY.read_text().strip()
+            container.openrouter_key = openrouter_key(agent)
             times["usage_before_read"] = time.time()
             usage_before = openrouter_usage(container.openrouter_key)
         container.bridge = compose(REPO, "ps", "-q", "bridge")
@@ -470,7 +475,7 @@ def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None, 
                 thread = threading.Thread(target=write_opencode_cost,
                                           args=(run_dir, container.openrouter_key, usage_before, spec["model"]))
                 thread.start()
-                PENDING_COSTS.append(thread)
+                PENDING_COSTS.setdefault(agent, []).append(thread)
             else:
                 log("waiting for OpenRouter's usage of the key to settle")
                 write_opencode_cost(run_dir, container.openrouter_key, usage_before, spec["model"])

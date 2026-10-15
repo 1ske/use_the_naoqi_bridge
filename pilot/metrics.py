@@ -63,7 +63,7 @@ def harness_cost(harness, agent_dir, price=None):
         cost = json.loads(cost_file.read_text())
         if not cost["settled"]:
             return None, "missing: OpenRouter's usage did not settle within %d s" % cost["waited_s"]
-        return cost["cost_usd"], "OpenRouter usage of the shared key, after minus before the run"
+        return cost["cost_usd"], cost.get("source", "OpenRouter key usage, after minus before the run")
     if harness == "agy":
         results = [e["result"] for e in read_jsonl_lenient(agent_dir / "transcript.jsonl") if e.get("event") == "result"]
         if not results or not results[-1].get("usage"):

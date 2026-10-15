@@ -74,7 +74,8 @@
     "proxy_allow": [
       "^openrouter\\.ai$"
     ],
-    "deviations_ref": "opencode"
+    "deviations_ref": "opencode",
+    "openrouter_key_file": "~/.naoqi-pilot/templates/openrouter/api-key-A2"
   },
   "A3": {
     "harness": "claude-code",
@@ -102,7 +103,8 @@
       "^openrouter\\.ai$"
     ],
     "deviations_ref": "opencode",
-    "model_id_source": "confirmed by the author 2026-10-15; listed by the Claude subscription's /v1/models and OpenRouter's catalogue"
+    "model_id_source": "confirmed by the author 2026-10-15; listed by the Claude subscription's /v1/models and OpenRouter's catalogue",
+    "openrouter_key_file": "~/.naoqi-pilot/templates/openrouter/api-key-A4"
   },
   "A5": {
     "harness": "claude-code",
@@ -130,7 +132,8 @@
       "^openrouter\\.ai$"
     ],
     "deviations_ref": "opencode",
-    "model_id_source": "confirmed by the author 2026-10-15; listed by the Claude subscription's /v1/models and OpenRouter's catalogue"
+    "model_id_source": "confirmed by the author 2026-10-15; listed by the Claude subscription's /v1/models and OpenRouter's catalogue",
+    "openrouter_key_file": "~/.naoqi-pilot/templates/openrouter/api-key-A6"
   },
   "A7": {
     "harness": "agy",
@@ -160,7 +163,8 @@
     "proxy_allow": [
       "^openrouter\\.ai$"
     ],
-    "deviations_ref": "opencode"
+    "deviations_ref": "opencode",
+    "openrouter_key_file": "~/.naoqi-pilot/templates/openrouter/api-key-A8"
   },
   "cost_sources": {
     "_comment": "Where each agent's cost comes from (section 5.1.8; decided 2026-10-05, per agent since 2026-10-15). A value that is not reported is recorded as missing, never estimated.",
@@ -174,10 +178,11 @@
     "A7": "agy",
     "sources": {
       "claude-code": "total_cost_usd from Claude Code's result event (computed by Claude Code at Anthropic's API prices; under the subscription login this is not a bill).",
-      "opencode": "One OpenRouter API key shared by all A2, A4, A6 and A8 runs (~/.naoqi-pilot/templates/openrouter/api-key, limit 50 USD): a run's cost is the key's usage after the run minus its usage before it, read from OpenRouter's /api/v1/key once the value has stopped changing. Valid because runs never overlap and nothing else uses the key; includes all requests of the run, also the title request.",
+      "opencode": "One OpenRouter API key per OpenCode agent (A2, A4, A6, A8; agents.json openrouter_key_file, limit 50 USD each), used by nothing else: a run's cost is its agent's key's usage after the run minus its usage before it, read from OpenRouter's /api/v1/key once the value has stopped changing (after it has reached 0.9 x the run's own request costs). Valid because an agent's runs never overlap; includes all requests of the run, also the title request.",
       "agy": "agy's token counts from its result event, priced at Google's list price for gemini-3.8-flash; the price used is stored in the manifest."
     },
-    "opencode_approved": "2026-10-06: shared key with usage difference instead of one key per run (no provisioning key)"
+    "opencode_approved": "2026-10-06: shared key with usage difference instead of one key per run (no provisioning key)",
+    "opencode_changed": "2026-10-15, after the Corridor pilot: one key per OpenCode agent instead of one key shared by all four (OpenRouter posted a run's usage 3-19 min late, so a shared key made every OpenCode run wait for the previous one's cost)"
   },
   "transcript_check": {
     "_comment": "Fixed 2026-10-05, before the pilot. Applied by pilot/transcript_check.py after every run.",
