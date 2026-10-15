@@ -263,16 +263,45 @@ def wait_for_pending_costs():
         thread.join()
 
 
-def write_opencode_cost(run_dir, key, usage_before):
-    floor = opencode_step_costs(run_dir / "agent")
+def opencode_token_floor(agent_dir, model):
+    """The run's token counts (OpenCode's step_finish events) at OpenRouter's catalogue prices for the model, without
+    reasoning tokens, and the prices used. Only a lower bound for settling (OpenCode 2.0.21 logs cost 0 for models
+    it does not know, e.g. Claude Haiku 5.5); the cost itself stays the key's usage difference."""
+    try:
+        with urllib.request.urlopen("https://openrouter.ai/api/v1/models", timeout=20) as response:
+            price = next(m["pricing"] for m in json.loads(response.read())["data"] if m["id"] == model)
+    except (OSError, ValueError, StopIteration):
+        return 0.0, None
+    total = 0.0
+    for line in (agent_dir / "transcript.jsonl").read_text(errors="replace").splitlines() if \
+            (agent_dir / "transcript.jsonl").exists() else []:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if event.get("type") == "step_finish":
+            t = (event.get("part") or {}).get("tokens") or {}
+            cache = t.get("cache") or {}
+            total += (t.get("input", 0) * float(price["prompt"]) + t.get("output", 0) * float(price["completion"])
+                      + cache.get("read", 0) * float(price.get("input_cache_read", 0))
+                      + cache.get("write", 0) * float(price.get("input_cache_write", 0)))
+    return round(total, 8), price
+
+
+def write_opencode_cost(run_dir, key, usage_before, model):
+    steps = opencode_step_costs(run_dir / "agent")
+    tokens, price = opencode_token_floor(run_dir / "agent", model)
+    floor = 0.9 * max(steps, tokens)
     usage_after, waited, settled = settled_usage(key, usage_before, floor)
     (run_dir / "cost.json").write_text(json.dumps({
         "source": "OpenRouter /api/v1/key usage of the shared key (A2, A4, A6, A8), after minus before the run",
         "usage_before_usd": usage_before, "usage_after_usd": usage_after,
         "cost_usd": round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited,
-        "settle_rule": "unchanged for %d reads %d s apart, after usage - before reached the step costs"
+        "settle_rule": "unchanged for %d reads %d s apart, after usage - before reached the floor: 0.9 x the larger of "
+                       "OpenCode's per-request costs and the token counts at OpenRouter's catalogue prices"
                        % (USAGE_STABLE_READS, USAGE_POLL),
-        "cross_check_step_costs_usd": floor}, indent=2))
+        "settle_floor_usd": round(floor, 8), "cross_check_step_costs_usd": steps,
+        "cross_check_tokens_at_catalogue_price_usd": tokens, "catalogue_price_per_token": price}, indent=2))
     log("%s: OpenRouter cost %s" % (run_dir.name, "settled after %d s" % waited if settled else "NOT settled (missing)"))
 
 
@@ -438,12 +467,12 @@ def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None, 
             if defer_cost:
                 log("OpenRouter cost: settling in the background (the next OpenCode run waits for it)")
                 thread = threading.Thread(target=write_opencode_cost,
-                                          args=(run_dir, container.openrouter_key, usage_before))
+                                          args=(run_dir, container.openrouter_key, usage_before, spec["model"]))
                 thread.start()
                 PENDING_COSTS.append(thread)
             else:
                 log("waiting for OpenRouter's usage of the key to settle")
-                write_opencode_cost(run_dir, container.openrouter_key, usage_before)
+                write_opencode_cost(run_dir, container.openrouter_key, usage_before, spec["model"])
         check = transcript_check.check(agent, run_dir / "agent")
         (run_dir / "transcript_check.json").write_text(json.dumps(check, indent=2))
         if not check["transcript_found"] and not invalid:

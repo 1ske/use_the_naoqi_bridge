@@ -182,8 +182,9 @@ def attempt(agent, check, fake, check_dir, when=None):
             result["reached_model"] = reached_model(cap, word, png)
             shutil.copy(cap / "requests.jsonl", folder / "fake_llm_requests.jsonl")
         if usage_before is not None:
-            usage_after, waited, settled = runner.settled_usage(container.openrouter_key, usage_before,
-                                                                runner.opencode_step_costs(folder / "agent"))
+            floor = 0.9 * max(runner.opencode_step_costs(folder / "agent"),
+                              runner.opencode_token_floor(folder / "agent", spec["model"])[0])
+            usage_after, waited, settled = runner.settled_usage(container.openrouter_key, usage_before, floor)
             (folder / "cost.json").write_text(json.dumps({
                 "source": "OpenRouter /api/v1/key usage of the shared key (A2, A4, A6, A8), after minus before the attempt",
                 "usage_before_usd": usage_before, "usage_after_usd": usage_after,
