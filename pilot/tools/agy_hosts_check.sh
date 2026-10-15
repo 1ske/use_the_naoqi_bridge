@@ -1,6 +1,6 @@
 #!/bin/bash
 # Check of which hosts agy contacts in a session (not used in runs). Runs agy with the template login and the prompt
-# "Say OK." behind a proxy that allows every host except the ones A6 keeps blocked (feature flags, logging) and other
+# "Say OK." behind a proxy that allows every host except the ones A7 (agy) keeps blocked (feature flags, logging) and other
 # Gemini endpoints. agy's eligibility check needs its model host (daily-cloudcode-pa, loadCodeAssist), so this makes
 # one small model request on the Google login. Prints the hosts agy connected to and the ones it was refused.
 #   agy_hosts_check.sh OUTDIR
@@ -35,7 +35,7 @@ P=http://$PROXY:8888
 docker create --name $AGENT --network $NET --hostname agent -v "$OUT":/out \
     -e HTTPS_PROXY=$P -e HTTP_PROXY=$P -e https_proxy=$P -e http_proxy=$P \
     -e NO_PROXY=bridge,localhost,127.0.0.1 -e no_proxy=bridge,localhost,127.0.0.1 \
-    naoqi-pilot/agy pilot-agent "Say OK." >/dev/null
+    naoqi-pilot/agy pilot-agent "Say OK." gemini-3.8-flash-medium >/dev/null
 stage=$(mktemp -d); mkdir -p "$stage/.gemini/antigravity-cli"
 cp "$TOKEN" "$stage/.gemini/antigravity-cli/antigravity-oauth-token"; chmod 600 "$stage/.gemini/antigravity-cli/antigravity-oauth-token"
 docker cp "$stage/." $AGENT:/stage >/dev/null; rm -rf "$stage"

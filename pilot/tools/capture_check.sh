@@ -19,7 +19,7 @@ common=(--network $NET --hostname agent -v "$OUT/out":/out -e NO_PROXY=bridge,lo
 case $HARNESS in
 claude)
     cid=$(docker create "${common[@]}" -e CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-capture-check-not-a-token \
-          -e ANTHROPIC_BASE_URL=http://fake-llm:8080 naoqi-pilot/claude pilot-agent "$PROMPT") ;;
+          -e ANTHROPIC_BASE_URL=http://fake-llm:8080 naoqi-pilot/claude pilot-agent "$PROMPT" "${3:-claude-opus-5-5}") ;;
 opencode)
     cid=$(docker create "${common[@]}" -e OPENROUTER_API_KEY=sk-or-capture-check-not-a-key \
           -e OPENCODE_CONFIG_CONTENT='{"providers":{"openrouter":{"settings":{"baseURL":"http://fake-llm:8080/api/v1"}}}}' \
@@ -31,7 +31,7 @@ agy)
         | python3 -c 'import json,sys; d=json.load(sys.stdin); d["modelProvider"]="gemini"; print(json.dumps(d))' \
         > "$stage/.gemini/antigravity-cli/settings.json"
     cid=$(docker create "${common[@]}" -e GEMINI_API_KEY=capture-check-not-a-key \
-          -e GOOGLE_GEMINI_BASE_URL=http://fake-llm:8080 naoqi-pilot/agy pilot-agent "$PROMPT")
+          -e GOOGLE_GEMINI_BASE_URL=http://fake-llm:8080 naoqi-pilot/agy pilot-agent "$PROMPT" gemini-3.8-flash-medium)
     docker cp "$stage/." "$cid":/stage >/dev/null; rm -rf "$stage" ;;
 esac
 ( sleep 180; docker stop -t 2 "$cid" >/dev/null 2>&1 ) & watchdog=$!

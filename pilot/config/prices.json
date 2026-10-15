@@ -1,5 +1,5 @@
 {
-  "_comment": "List prices for costing runs whose harness reports tokens, not cost (A6; agents.json, cost_sources). The runner copies the entry into every manifest that uses it, and refuses runs after valid_through.",
+  "_comment": "List prices for costing runs whose harness reports tokens, not cost (A7; agents.json, cost_sources). The runner copies the entry into every manifest that uses it, and refuses runs after valid_through.",
   "gemini-3.8-flash": {
     "source": "https://ai.google.dev/gemini-api/docs/pricing",
     "accessed": "2026-10-06",
