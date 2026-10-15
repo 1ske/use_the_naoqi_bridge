@@ -387,10 +387,11 @@ def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None, 
         if spec["harness"] == "agy" and not fake_script and not agy_login_ok(run_id):
             end, invalid = "setup_failure", "the agy login has expired (agy models failed)"
             raise RuntimeError(invalid)
+        if spec["harness"] == "opencode" and not fake_script:
+            wait_for_pending_costs()  # before the reset, so that the simulator does not idle at the start pose
         supervisor = reset(run_id, world)
         if spec["harness"] == "opencode" and not fake_script:
             container.openrouter_key = OPENROUTER_KEY.read_text().strip()
-            wait_for_pending_costs()
             times["usage_before_read"] = time.time()
             usage_before = openrouter_usage(container.openrouter_key)
         container.bridge = compose(REPO, "ps", "-q", "bridge")
