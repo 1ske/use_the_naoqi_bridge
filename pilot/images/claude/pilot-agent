@@ -1,10 +1,10 @@
 #!/bin/sh
-# pilot-agent PROMPT: one headless Claude Code session; the stream-json transcript goes to /out.
+# pilot-agent PROMPT MODEL: one headless Claude Code session with MODEL (A1, A3, A5: pilot/config/agents.json); the stream-json transcript goes to /out.
 # Built-in tools off (--tools ""), only the NAO MCP server (--strict-mcp-config), its tools pre-approved.
 # The login comes from CLAUDE_CODE_OAUTH_TOKEN, which the runner sets for this container only.
 date +%s.%N >/out/t0  # prompt submitted: start of the run
 exec claude -p "$1" \
-    --model claude-opus-5-5 --effort medium \
+    --model "$2" --effort medium \
     --output-format stream-json --verbose \
     --tools "" --strict-mcp-config --mcp-config /etc/pilot/mcp.json \
     --settings /etc/pilot/claude-settings.json \

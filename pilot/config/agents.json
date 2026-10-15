@@ -1,10 +1,74 @@
 {
-  "_comment": "The six agents of the pilot. The runner copies an agent's entry into every run manifest. Deviations are from the harness's defaults; 'approved' gives the date the author approved a deviation that was not in the original spec.",
+  "_comment": "The eight agents of the study as a grid (section 5.1.5, Table 5.5): each LLM in its native harness (odd numbers) and in OpenCode (even numbers), so the two agents of a harness pair are next to each other. The runner copies an agent's entry into every run manifest. Deviations are from the harness's defaults; 'approved' gives the date the author approved a deviation that was not in the original spec. Renumbered 2026-10-15 from the void first pilot: old A5 -> A1, old A1 -> A2, old A6 -> A7, old A2 -> A8; A3-A6 are new.",
+  "grid": {
+    "_comment": "Rows hold the LLM constant (RQ2, contrasts C3-C6), columns the harness (RQ1, C1 and C2).",
+    "pairs": [
+      [
+        "A1",
+        "A2"
+      ],
+      [
+        "A3",
+        "A4"
+      ],
+      [
+        "A5",
+        "A6"
+      ],
+      [
+        "A7",
+        "A8"
+      ]
+    ],
+    "contrasts": {
+      "C1": [
+        "A1",
+        "A3",
+        "A5"
+      ],
+      "C2": [
+        "A2",
+        "A4",
+        "A6",
+        "A8"
+      ],
+      "C3": [
+        "A1",
+        "A2"
+      ],
+      "C4": [
+        "A3",
+        "A4"
+      ],
+      "C5": [
+        "A5",
+        "A6"
+      ],
+      "C6": [
+        "A7",
+        "A8"
+      ]
+    }
+  },
   "A1": {
+    "harness": "claude-code",
+    "image": "naoqi-pilot/claude",
+    "llm": "Claude Opus 5.5",
+    "model": "claude-opus-5-5",
+    "model_id_confirmed": true,
+    "access_route": "Claude subscription login (claude setup-token, CLAUDE_CODE_OAUTH_TOKEN), no API key; shared by A1, A3 and A5, and so are its usage limits",
+    "reasoning": "--effort medium (sent as output_config.effort = medium)",
+    "proxy_allow": [
+      "^api\\.anthropic\\.com$"
+    ],
+    "deviations_ref": "claude-code"
+  },
+  "A2": {
     "harness": "opencode",
     "image": "naoqi-pilot/opencode",
     "llm": "Claude Opus 5.5",
     "model": "anthropic/claude-opus-5.5",
+    "model_id_confirmed": true,
     "access_route": "OpenRouter, provider 'anthropic' only, allow_fallbacks false",
     "reasoning": "reasoning.effort = medium in every request body",
     "proxy_allow": [
@@ -12,36 +76,28 @@
     ],
     "deviations_ref": "opencode"
   },
-  "A2": {
-    "harness": "opencode",
-    "image": "naoqi-pilot/opencode",
-    "llm": "Gemini 3.8 Flash",
-    "model": "google/gemini-3.8-flash",
-    "access_route": "OpenRouter, provider 'google-ai-studio' only, allow_fallbacks false",
-    "reasoning": "reasoning.effort = medium in every request body",
-    "proxy_allow": [
-      "^openrouter\\.ai$"
-    ],
-    "deviations_ref": "opencode"
-  },
   "A3": {
-    "harness": "opencode",
-    "image": "naoqi-pilot/opencode",
-    "llm": "GPT-6.1 Sol",
-    "model": "openai/gpt-6.1-sol",
-    "access_route": "OpenRouter, provider 'openai' only, allow_fallbacks false",
-    "reasoning": "reasoning.effort = medium in every request body",
+    "harness": "claude-code",
+    "image": "naoqi-pilot/claude",
+    "llm": "Claude Sonnet 5.5",
+    "model": "claude-sonnet-5-5",
+    "model_id_confirmed": false,
+    "model_id_note": "TODO(author): ID as listed in Anthropic's model table and OpenRouter's catalogue (2026-10-15), not yet confirmed by the author; the runner refuses non-test runs until model_id_confirmed is true",
+    "access_route": "Claude subscription login (claude setup-token, CLAUDE_CODE_OAUTH_TOKEN), no API key; shared by A1, A3 and A5, and so are its usage limits",
+    "reasoning": "--effort medium (sent as output_config.effort = medium)",
     "proxy_allow": [
-      "^openrouter\\.ai$"
+      "^api\\.anthropic\\.com$"
     ],
-    "deviations_ref": "opencode"
+    "deviations_ref": "claude-code"
   },
   "A4": {
     "harness": "opencode",
     "image": "naoqi-pilot/opencode",
-    "llm": "Qwen3.8-27B",
-    "model": "qwen/qwen3.8-27b",
-    "access_route": "OpenRouter, provider 'alibaba' only, allow_fallbacks false",
+    "llm": "Claude Sonnet 5.5",
+    "model": "anthropic/claude-sonnet-5.5",
+    "model_id_confirmed": false,
+    "model_id_note": "TODO(author): ID as listed in Anthropic's model table and OpenRouter's catalogue (2026-10-15), not yet confirmed by the author; the runner refuses non-test runs until model_id_confirmed is true",
+    "access_route": "OpenRouter, provider 'anthropic' only, allow_fallbacks false",
     "reasoning": "reasoning.effort = medium in every request body",
     "proxy_allow": [
       "^openrouter\\.ai$"
@@ -51,9 +107,11 @@
   "A5": {
     "harness": "claude-code",
     "image": "naoqi-pilot/claude",
-    "llm": "Claude Opus 5.5",
-    "model": "claude-opus-5-5",
-    "access_route": "Claude subscription login (claude setup-token, CLAUDE_CODE_OAUTH_TOKEN), no API key",
+    "llm": "Claude Haiku 5.5",
+    "model": "claude-haiku-5-5",
+    "model_id_confirmed": false,
+    "model_id_note": "TODO(author): ID as listed in Anthropic's model table and OpenRouter's catalogue (2026-10-15), not yet confirmed by the author; the runner refuses non-test runs until model_id_confirmed is true",
+    "access_route": "Claude subscription login (claude setup-token, CLAUDE_CODE_OAUTH_TOKEN), no API key; shared by A1, A3 and A5, and so are its usage limits",
     "reasoning": "--effort medium (sent as output_config.effort = medium)",
     "proxy_allow": [
       "^api\\.anthropic\\.com$"
@@ -61,10 +119,25 @@
     "deviations_ref": "claude-code"
   },
   "A6": {
+    "harness": "opencode",
+    "image": "naoqi-pilot/opencode",
+    "llm": "Claude Haiku 5.5",
+    "model": "anthropic/claude-haiku-5.5",
+    "model_id_confirmed": false,
+    "model_id_note": "TODO(author): ID as listed in Anthropic's model table and OpenRouter's catalogue (2026-10-15), not yet confirmed by the author; the runner refuses non-test runs until model_id_confirmed is true",
+    "access_route": "OpenRouter, provider 'anthropic' only, allow_fallbacks false",
+    "reasoning": "reasoning.effort = medium in every request body",
+    "proxy_allow": [
+      "^openrouter\\.ai$"
+    ],
+    "deviations_ref": "opencode"
+  },
+  "A7": {
     "harness": "agy",
     "image": "naoqi-pilot/agy",
     "llm": "Gemini 3.8 Flash",
     "model": "gemini-3.8-flash-medium",
+    "model_id_confirmed": true,
     "access_route": "Google account login (template token file), no API key",
     "reasoning": "model gemini-3.8-flash-medium (agy encodes the effort in the model name)",
     "proxy_allow": [
@@ -76,16 +149,39 @@
     "deviations_ref": "agy",
     "cost_known_missing": "The title request agy sends to gemini-3.1-flash-lite-preview in every run is not in agy's token counts, so it is not in the cost."
   },
+  "A8": {
+    "harness": "opencode",
+    "image": "naoqi-pilot/opencode",
+    "llm": "Gemini 3.8 Flash",
+    "model": "google/gemini-3.8-flash",
+    "model_id_confirmed": true,
+    "access_route": "OpenRouter, provider 'google-ai-studio' only, allow_fallbacks false",
+    "reasoning": "reasoning.effort = medium in every request body",
+    "proxy_allow": [
+      "^openrouter\\.ai$"
+    ],
+    "deviations_ref": "opencode"
+  },
   "cost_sources": {
-    "_comment": "Where each agent's cost comes from (decided 2026-10-05). A value that is not reported is recorded as missing, never estimated.",
-    "opencode": "One OpenRouter API key shared by all A1-A4 runs (~/.naoqi-pilot/templates/openrouter/api-key, limit 50 USD): a run's cost is the key's usage after the run minus its usage before it, read from OpenRouter's /api/v1/key once the value has stopped changing. Valid because runs never overlap and nothing else uses the key; includes all requests of the run, also the title request.",
-    "claude-code": "total_cost_usd from Claude Code's result event (computed by Claude Code at Anthropic's list price).",
-    "agy": "agy's token counts from its result event, priced at Google's list price for gemini-3.8-flash; the price used is stored in the manifest.",
+    "_comment": "Where each agent's cost comes from (section 5.1.8; decided 2026-10-05, per agent since 2026-10-15). A value that is not reported is recorded as missing, never estimated.",
+    "A1": "claude-code",
+    "A3": "claude-code",
+    "A5": "claude-code",
+    "A2": "opencode",
+    "A4": "opencode",
+    "A6": "opencode",
+    "A8": "opencode",
+    "A7": "agy",
+    "sources": {
+      "claude-code": "total_cost_usd from Claude Code's result event (computed by Claude Code at Anthropic's API prices; under the subscription login this is not a bill).",
+      "opencode": "One OpenRouter API key shared by all A2, A4, A6 and A8 runs (~/.naoqi-pilot/templates/openrouter/api-key, limit 50 USD): a run's cost is the key's usage after the run minus its usage before it, read from OpenRouter's /api/v1/key once the value has stopped changing. Valid because runs never overlap and nothing else uses the key; includes all requests of the run, also the title request.",
+      "agy": "agy's token counts from its result event, priced at Google's list price for gemini-3.8-flash; the price used is stored in the manifest."
+    },
     "opencode_approved": "2026-10-06: shared key with usage difference instead of one key per run (no provisioning key)"
   },
   "transcript_check": {
     "_comment": "Fixed 2026-10-05, before the pilot. Applied by pilot/transcript_check.py after every run.",
-    "rule": "A call to any tool other than the 8 NAO tools is a protocol violation, and the run counts as a failure. Exception, A6 only: calls to manage_task, list_resources and read_resource are not violations (shown to give no outside information or effect), and neither are calls to view_file on an image agy offloaded from a NAO tool result or on the file in which agy puts the naoqi server's instructions (view_file_allowed_path); they are counted per run and reported. view_file on any other path is a violation.",
+    "rule": "A call to any tool other than the 8 NAO tools is a protocol violation, and the run counts as a failure. Exception, A7 only: calls to manage_task, list_resources and read_resource are not violations (shown to give no outside information or effect), and neither are calls to view_file on an image agy offloaded from a NAO tool result or on the file in which agy puts the naoqi server's instructions (view_file_allowed_path); they are counted per run and reported. view_file on any other path is a violation.",
     "nao_tools": [
       "get_state",
       "look",
@@ -102,7 +198,7 @@
       "agy": "mcp_naoqi_{tool}"
     },
     "exempt": {
-      "A6": [
+      "A7": [
         "manage_task",
         "list_resources",
         "read_resource",
@@ -110,7 +206,7 @@
       ]
     },
     "view_file_allowed_path": "^/home/agent/\\.gemini/antigravity-cli/(brain/[^/]+/\\.system_generated/steps/[0-9]+/media_[0-9]+\\.[a-z]+|mcp/naoqi/instructions\\.md)$",
-    "rule_changed": "2026-10-06: view_file on offloaded tool-result images and on agy's copy of the naoqi server's instructions exempt for A6 (agy shows both to the model only through view_file)"
+    "rule_changed": "2026-10-06: view_file on offloaded tool-result images and on agy's copy of the naoqi server's instructions exempt for A7 (A6 before the renumbering of 2026-10-15) (agy shows both to the model only through view_file)"
   },
   "deviations": {
     "opencode": [

@@ -1,4 +1,4 @@
-# A1-A4: OpenCode 2.0.21 (npm @opencode/cli-linux-arm64, checked against the registry's sha512).
+# A2, A4, A6, A8: OpenCode 2.0.21 (npm @opencode/cli-linux-arm64, checked against the registry's sha512).
 ARG BASE
 FROM ${BASE}
 ARG OPENCODE_VERSION=2.0.21

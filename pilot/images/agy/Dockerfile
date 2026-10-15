@@ -1,4 +1,4 @@
-# A6: Antigravity CLI (agy) 1.2.17, pinned by URL and sha512 from the linux_arm64 release manifest.
+# A7: Antigravity CLI (agy) 1.2.17, pinned by URL and sha512 from the linux_arm64 release manifest.
 # 1.2.16, the version on the author's Mac, has no Linux download (decision 2026-10-05).
 ARG BASE
 FROM ${BASE}

@@ -1,4 +1,4 @@
-# A5: Claude Code 2.1.280 (native linux-arm64 build, checked against the release manifest's sha256).
+# A1, A3, A5: Claude Code 2.1.280 (native linux-arm64 build, checked against the release manifest's sha256).
 ARG BASE
 FROM ${BASE}
 ARG CLAUDE_VERSION=2.1.280

@@ -5,9 +5,11 @@ Per run:
   * an allowlisting proxy (naoqi-pilot/proxy) on that network and a normal one, with the agent's proxy_allow;
   * the bridge container attached to the network under the alias "bridge" (the MCP server's NAOQI_BRIDGE_URL);
   * a new container from the agent's image. Nothing from the host is mounted except the run's output directory
-    (/out). The login comes from its template: the A5 token as an environment variable, read from the template
-    file at the start of the run; the A6 token file copied in before start; the A1-A4 OpenRouter key (one per
-    run, see step 5) as an environment variable. Secret values never appear in a command line or a log.
+    (/out). The login comes from its template: the Claude subscription token (A1, A3, A5) as an environment
+    variable, read from the template file at the start of the run; the Google login's token file (A7) copied in
+    before start; the shared OpenRouter key as an environment variable, and only for the OpenCode agents (A2, A4,
+    A6, A8). Secret values never appear in a command line or a log.
+  * the harness gets the agent's model from pilot/config/agents.json as the second argument of pilot-agent.
 After the run the container, the proxy and the network are removed, and the bridge is detached.
 """
 import json
@@ -18,6 +20,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 AGENTS = json.loads((REPO / "pilot" / "config" / "agents.json").read_text())
+AGENT_IDS = [a for a in AGENTS if a[:1] == "A" and a[1:].isdigit()]
+# The grid (section 5.1.5): odd = native harness, even = OpenCode. Only the OpenCode agents get the OpenRouter key.
+assert AGENT_IDS == ["A%d" % i for i in range(1, 9)], AGENT_IDS
+assert all((AGENTS[a]["harness"] == "opencode") == (int(a[1:]) % 2 == 0) for a in AGENT_IDS)
 TEMPLATES = Path.home() / ".naoqi-pilot" / "templates"
 CLAUDE_TOKEN = TEMPLATES / "claude" / "oauth-token"
 AGY_TOKEN = TEMPLATES / "agy" / "antigravity-cli" / "antigravity-oauth-token"
@@ -93,9 +99,9 @@ class AgentContainer:
                 raise ValueError("%s needs the run's OpenRouter key" % self.agent)
             env["OPENROUTER_API_KEY"] = self.openrouter_key
             args += ["-e", "OPENROUTER_API_KEY"]
-        args += [self.image, "pilot-agent", prompt]
-        if harness == "opencode":
-            args.append(self.spec["model"])
+        if self.openrouter_key and harness != "opencode":
+            raise ValueError("%s is not an OpenCode agent: it must not get the OpenRouter key" % self.agent)
+        args += [self.image, "pilot-agent", prompt, self.spec["model"]]
         docker(*args, env=env)
         self.created.append(("container", self.name))
         if harness == "agy" and not self.test_env:
@@ -143,9 +149,9 @@ class AgentContainer:
 
 
 def agy_login_ok(run_id):
-    """Free pre-run check for A6: `agy models` (no model request) in a throwaway container with a copy of the
-    template login, through A6's proxy allowlist. False means the login has expired: the run is invalid."""
-    probe = AgentContainer(run_id + "-login", "A6", tempfile.mkdtemp(prefix="pilot-login-"))
+    """Free pre-run check for A7: `agy models` (no model request) in a throwaway container with a copy of the
+    template login, through A7's proxy allowlist. False means the login has expired: the run is invalid."""
+    probe = AgentContainer(run_id + "-login", "A7", tempfile.mkdtemp(prefix="pilot-login-"))
     try:
         probe.setup_network()
         proxy = "http://%s:8888" % probe.proxy
@@ -156,6 +162,6 @@ def agy_login_ok(run_id):
         probe.created.append(("container", probe.name))
         probe.stage_agy_login(probe.name)
         output = docker("start", "-a", probe.name, check=False)
-        return probe.exit_code() == "0" and "gemini-3.8-flash-medium" in output
+        return probe.exit_code() == "0" and AGENTS["A7"]["model"] in output
     finally:
         probe.remove()

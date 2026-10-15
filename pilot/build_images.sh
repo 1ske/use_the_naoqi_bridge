@@ -45,12 +45,18 @@ claude_verify_id=$(build claude-verify "$STAGE/claude-verify" --build-arg "HARNE
 opencode_verify_id=$(build opencode-verify "$STAGE/opencode-verify" --build-arg "HARNESS_IMAGE=$(harness_ref opencode)")
 agy_verify_id=$(build agy-verify "$STAGE/agy-verify" --build-arg "HARNESS_IMAGE=$(harness_ref agy)")
 
+# Harness versions as the built images report them (each Dockerfile also checks its pinned version).
+claude_version=$(docker run --rm --entrypoint claude naoqi-pilot/claude --version | sed 's/ (Claude Code)$//')
+opencode_version=$(docker run --rm --entrypoint opencode naoqi-pilot/opencode --version | sed 's/^opencode v//')
+agy_version=$(docker run --rm --entrypoint agy naoqi-pilot/agy --version)
+
 commit=$(git -C "$REPO" rev-parse HEAD)
 dirty=$(git -C "$REPO" status --porcelain -- mcp_server src/primitives.json pilot/images pilot/verify | wc -l | tr -d ' ')
 python3 - "$LOCK" "$commit" "$dirty" "$base_id" "$claude_id" "$opencode_id" "$agy_id" "$proxy_id" \
-    "$claude_verify_id" "$opencode_verify_id" "$agy_verify_id" <<'EOF'
+    "$claude_verify_id" "$opencode_verify_id" "$agy_verify_id" "$claude_version" "$opencode_version" "$agy_version" <<'EOF'
 import json, sys, datetime
-lock, commit, dirty, base, claude, opencode, agy, proxy, claude_v, opencode_v, agy_v = sys.argv[1:]
+(lock, commit, dirty, base, claude, opencode, agy, proxy, claude_v, opencode_v, agy_v,
+ claude_version, opencode_version, agy_version) = sys.argv[1:]
 json.dump({
     "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
     "built_from_commit": commit,
@@ -58,7 +64,8 @@ json.dump({
     "images": {"naoqi-pilot/base": base, "naoqi-pilot/claude": claude, "naoqi-pilot/opencode": opencode,
                "naoqi-pilot/agy": agy, "naoqi-pilot/proxy": proxy, "naoqi-pilot/claude-verify": claude_v,
                "naoqi-pilot/opencode-verify": opencode_v, "naoqi-pilot/agy-verify": agy_v},
-    "harness_versions": {"claude": "2.1.280", "opencode": "2.0.21", "agy": "1.2.17"},
+    "harness_versions": {"claude": claude_version, "opencode": opencode_version, "agy": agy_version},
+    "harness_versions_source": "--version of each built image",
 }, open(lock, "w"), indent=2)
 print(open(lock).read())
 EOF
