@@ -9,7 +9,7 @@ mkdir -p "$OUT/out"
 case $HARNESS in
 claude)   allow='^api\.anthropic\.com$'
           env=(-e CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-proxy-check-not-a-token)
-          cmd=(naoqi-pilot/claude pilot-agent "Say hello.") ;;
+          cmd=(naoqi-pilot/claude pilot-agent "Say hello." claude-opus-5-5) ;;
 opencode) allow='^openrouter\.ai$'
           env=(-e OPENROUTER_API_KEY=sk-or-v1-proxy-check-not-a-key)
           cmd=(naoqi-pilot/opencode pilot-agent "Say hello." anthropic/claude-opus-5.5) ;;
