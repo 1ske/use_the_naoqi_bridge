@@ -4,9 +4,10 @@
 # ///
 """The analysis of section 5.1.10, from the run records of one phase (reads the records, changes nothing).
 
-    uv run --script pilot/analysis.py [--phase pilot|main] [--runs DIR] [--out DIR]
+    uv run --script pilot/analysis.py [--phase pilot|main|test] [--runs DIR] [--out DIR]
 
-Uses the valid, non-excluded runs of the phase (pilot/records.py, pilot/metrics.py), each task separately, every
+Uses the valid, non-excluded runs of the phase (test: only to check the instrumentation itself; test runs are never
+part of the pilot or the main runs) (pilot/records.py, pilot/metrics.py), each task separately, every
 estimate with its number of runs. Writes OUT/analysis.json and these LaTeX tabulars (\\input them inside a table):
   success.tex     per task and agent: successes / valid runs, success rate, 95 % Wilson score interval
   tests.tex       C3-C6: Barnard's exact test on task success, per simulated task (8 tests, unadjusted), and C7: the
@@ -72,15 +73,13 @@ def median_iqr(values):
 
 def load(phase, folder=None, allow_synthetic=False):
     """All runs of the phase with their metrics: [(manifest, metrics)]. Test runs are never part of it."""
-    if phase == "test":
-        raise SystemExit("test runs are not analysed (section 5.1.7)")
     out = []
     for run_dir in records.runs_of(phase, folder):
         manifest = json.loads((run_dir / "manifest.json").read_text())
         if manifest.get("synthetic") and not allow_synthetic:
             raise SystemExit("%s is a synthetic record; pass --allow-synthetic to analyse synthetic records" % run_dir)
-        if manifest.get("test"):
-            continue
+        if manifest.get("test") and phase != "test":
+            continue  # never part of the pilot or the main runs
         m = metrics.metrics(run_dir)
         check = run_dir / "transcript_check.json"
         m["exempt_calls"] = json.loads(check.read_text()).get("exempt_calls", {}) if check.exists() else {}
@@ -272,7 +271,7 @@ def analyse(phase, folder=None, allow_synthetic=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--phase", choices=("pilot", "main"), default="pilot")
+    parser.add_argument("--phase", choices=records.PHASES, default="pilot")
     parser.add_argument("--runs", help="runs folder (default: the phase's); only runs whose manifest has the phase")
     parser.add_argument("--out", help="default: ~/.naoqi-pilot/grid/PHASE/analysis")
     parser.add_argument("--allow-synthetic", action="store_true")

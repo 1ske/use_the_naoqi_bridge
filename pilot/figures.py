@@ -4,7 +4,7 @@
 # ///
 """Figures for the thesis, from the run records of one phase (reads the records, changes nothing).
 
-    uv run --script pilot/figures.py [--phase pilot|main] [--runs DIR] [--out DIR] [--prefix P] [--allow-synthetic]
+    uv run --script pilot/figures.py [--phase pilot|main|test] [--runs DIR] [--out DIR] [--prefix P] [--allow-synthetic]
 
 Uses the valid, non-excluded runs of the phase and pilot/analysis.py's numbers (which also writes the tables). The
 agents are drawn as the grid of section 5.1.5: the two agents of a harness pair (same LLM) side by side, the native
@@ -308,7 +308,7 @@ def fig_paths(result, data, key, path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--phase", choices=("pilot", "main"), default="pilot")
+    parser.add_argument("--phase", choices=records.PHASES, default="pilot", help="test: instrumentation checks only")
     parser.add_argument("--runs", help="runs folder (default: the phase's); only runs whose manifest has the phase")
     parser.add_argument("--out", help="default: ~/.naoqi-pilot/grid/PHASE/figures")
     parser.add_argument("--prefix", default="")

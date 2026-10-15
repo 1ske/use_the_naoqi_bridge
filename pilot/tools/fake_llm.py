@@ -52,7 +52,10 @@ def with_tool_name(step, api, body):
     tool = name[4:]
     match = [t for t in offered_tools(api, body) if t and t in ("mcp__naoqi__" + tool, "naoqi_" + tool,
                                                                    "mcp_naoqi_" + tool)]
-    return dict(step, tool=match[0] if match else "naoqi_tool_not_offered_" + tool)
+    args = dict(step.get("args") or {})
+    if api == "gemini":  # agy requires its own toolSummary argument on every tool call
+        args.setdefault("toolSummary", "NAO %s" % tool)
+    return dict(step, tool=match[0] if match else "naoqi_tool_not_offered_" + tool, args=args)
 
 
 def with_offloaded(step, raw):
