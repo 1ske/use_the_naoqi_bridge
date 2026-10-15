@@ -182,6 +182,9 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
             raise RuntimeError(invalid)
         if spec["harness"] == "opencode":
             runner.wait_for_pending_costs(agent)
+            while cost_marker(agent).exists():
+                log("waiting for %s's previous run's cost to settle on OpenRouter (%s)" % (agent, cost_marker(agent).read_text()))
+                time.sleep(30)
         manifest["robot_before"] = {"battery": battery, "posture": state.get("posture"), "fallen": state.get("fallen"),
                                     "awake": state.get("awake")}
         manifest["operator_checklist"] = checklist_given or checklist()
@@ -265,14 +268,6 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
         container.collect()
         if (instrumentation / "calls.jsonl").exists():
             shutil.copy(instrumentation / "calls.jsonl", run_dir / "calls.jsonl")
-        if container.openrouter_key:
-            if defer_cost:
-                thread = threading.Thread(target=runner.write_opencode_cost,
-                                          args=(run_dir, container.openrouter_key, usage_before, spec["model"]))
-                thread.start()
-                runner.PENDING_COSTS.setdefault(agent, []).append(thread)
-            else:
-                runner.write_opencode_cost(run_dir, container.openrouter_key, usage_before, spec["model"])
         check = transcript_check.check(agent, run_dir / "agent")
         (run_dir / "transcript_check.json").write_text(json.dumps(check, indent=2))
         if not check["transcript_found"] and not invalid:
@@ -289,6 +284,21 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
                 notes["verdict"] = verdict(run_dir, spec["harness"])
                 print("  -> %s" % ("SUCCESS" if notes["verdict"]["success"] else "failure"))
         (run_dir / "operator_notes.json").write_text(json.dumps(notes, indent=2))
+        if container.openrouter_key:
+            # In the background, so that the verdict and the next run need not wait for OpenRouter; a marker file
+            # makes the same agent's next run wait, also from another process (search.py start).
+            marker = cost_marker(agent)
+            runner.write_atomic(marker, run_id)
+
+            def settle(key=container.openrouter_key, before=usage_before):
+                try:
+                    runner.write_opencode_cost(run_dir, key, before, spec["model"])
+                finally:
+                    marker.unlink(missing_ok=True)
+            thread = threading.Thread(target=settle)
+            thread.start()
+            runner.PENDING_COSTS.setdefault(agent, []).append(thread)
+            log("OpenRouter cost of %s: settling in the background (only %s's next run waits for it)" % (run_id, agent))
         manifest.update({"end_condition": end, "invalid_reason": invalid,
                          "harness_exited_in_grace_period": exited_in_grace,
                          "harness_exit_code": container.exit_code()})
@@ -304,6 +314,10 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
         log("run folder: %s" % run_dir)
     print("\nPut the robot back at the start pose (and check the ball) before the next run.")
     return run_dir
+
+
+def cost_marker(agent):
+    return runner.INSTRUMENTATION / ("cost-pending-%s" % agent)
 
 
 OPERATOR_END = runner.INSTRUMENTATION / "operator_end.json"  # written by `search.py intervene|fault` (chat mode)
@@ -413,7 +427,7 @@ def main():
                 raise SystemExit("every position of the %s order for Search has a valid run" % args.phase)
             log("position %d (block %d), %s, attempt %d" % (slot["position"], slot["block"], slot["agent"],
                                                            slot["attempt"]))
-            print(run(slot["agent"], args.phase, args.nao_ip, slot, defer_cost=False, checklist_given=given, chat=True))
+            print(run(slot["agent"], args.phase, args.nao_ip, slot, defer_cost=True, checklist_given=given, chat=True))
     elif args.cmd == "intervene":
         operator_end("intervention", args.cause)
     elif args.cmd == "fault":
