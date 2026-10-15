@@ -66,7 +66,7 @@ SIM_NAOQI = "host.docker.internal:9559"  # naoqisim's published port; a simulate
 POLL = 0.1
 OPENROUTER_KEY = PILOT_HOME / "templates" / "openrouter" / "api-key"  # shared by A2, A4, A6, A8 (agents.json, cost_sources)
 OPENROUTER_KEY_INFO = "https://openrouter.ai/api/v1/key"
-USAGE_FIRST_READ, USAGE_POLL, USAGE_STABLE_READS, USAGE_MAX_WAIT = 120, 10, 3, 420  # s, s, reads in a row, s
+USAGE_FIRST_READ, USAGE_POLL, USAGE_STABLE_READS, USAGE_MAX_WAIT = 60, 10, 3, 1200  # s, s, reads in a row, s
 T0_TIMEOUT = 120  # s from container start; OpenCode alone waits up to 60 s for the MCP server
 
 
@@ -249,15 +249,19 @@ def opencode_step_costs(agent_dir):
     return round(total, 8)
 
 
-def settled_usage(key):
-    """The key's usage once it has stopped changing. OpenRouter updates it up to a minute or more after the last
-    request, and it can stay unchanged meanwhile, so the first read is only USAGE_FIRST_READ s after the run."""
+def settled_usage(key, before=None, floor=0.0):
+    """The key's usage once it has stopped changing. OpenRouter adds a run's requests to the key's usage minutes after
+    them, and the usage stays unchanged meanwhile (2026-10-15: nothing after 150 s, still incomplete after 7 min), so
+    "unchanged" counts only once usage - before has reached floor: the sum of the per-request costs OpenRouter
+    returned to OpenCode (opencode_step_costs, which leaves out the title request). Returns (usage, waited s, settled);
+    not settled after USAGE_MAX_WAIT s means the cost is recorded as missing."""
     started, reads = time.time(), []
     time.sleep(USAGE_FIRST_READ - USAGE_POLL)
     while time.time() - started < USAGE_MAX_WAIT:
         time.sleep(USAGE_POLL)
         reads.append(openrouter_usage(key))
-        if len(reads) >= USAGE_STABLE_READS and len(set(reads[-USAGE_STABLE_READS:])) == 1:
+        reached = before is None or reads[-1] - before >= floor - 1e-9
+        if reached and len(reads) >= USAGE_STABLE_READS and len(set(reads[-USAGE_STABLE_READS:])) == 1:
             return reads[-1], round(time.time() - started), True
     return reads[-1], round(time.time() - started), False
 
@@ -402,12 +406,15 @@ def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None):
                 shutil.copy(instrumentation / name, run_dir / name)
         if container.openrouter_key:
             log("waiting for OpenRouter's usage of the key to settle")
-            usage_after, waited, settled = settled_usage(container.openrouter_key)
+            floor = opencode_step_costs(run_dir / "agent")
+            usage_after, waited, settled = settled_usage(container.openrouter_key, usage_before, floor)
             (run_dir / "cost.json").write_text(json.dumps({
                 "source": "OpenRouter /api/v1/key usage of the shared key (A2, A4, A6, A8), after minus before the run",
                 "usage_before_usd": usage_before, "usage_after_usd": usage_after,
                 "cost_usd": round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited,
-                "cross_check_step_costs_usd": opencode_step_costs(run_dir / "agent")}, indent=2))
+                "settle_rule": "unchanged for %d reads %d s apart, after usage - before reached the step costs"
+                               % (USAGE_STABLE_READS, USAGE_POLL),
+                "cross_check_step_costs_usd": floor}, indent=2))
         check = transcript_check.check(agent, run_dir / "agent")
         (run_dir / "transcript_check.json").write_text(json.dumps(check, indent=2))
         if not check["transcript_found"] and not invalid:
