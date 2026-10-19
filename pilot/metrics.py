@@ -18,7 +18,8 @@ Per run:
   * tokens (descriptive, an addition beyond Table 5.4, 2026-10-19): the harness's token counts (harness_tokens);
     None when missing.
   * safety_events: falls, and obstacle and bumped outcomes, in the same window as tool_calls. Interventions apply
-    to Search only.
+    to Search only. Search falls: the operator's count when given (operator_notes.json falls_observed; NAOqi reported
+    a fall the operator did not see, 2026-10-19), else NAOqi's fall events; falls_reported_by_naoqi keeps the latter.
   * instruction_following: whether the first two tool calls are get_state and then stand.
   * distance_to_goal_m (an addition beyond Table 5.4, approved 2026-10-06): the torso's distance to the goal surface
     at the moment rest arrived, from the same ground truth; None if the run did not end with rest or the torso was
@@ -330,7 +331,9 @@ def metrics(run_dir):
         "cost_usd": cost, "cost_source": cost_source,
         "tokens": tokens, "tokens_source": tokens_source,
         "safety_events": {
-            "falls": len(falls),
+            # Search: the falls the operator saw, when given (pilot/search.py falls; author 2026-10-19), else NAOqi's
+            "falls": (notes.get("falls_observed") or {}).get("count", len(falls)) if search else len(falls),
+            "falls_reported_by_naoqi": len(falls),
             "obstacle": outcomes.count("obstacle"),
             "bumped": outcomes.count("bumped"),
             "interventions": len(notes.get("interventions") or []) if search else None,  # Search only

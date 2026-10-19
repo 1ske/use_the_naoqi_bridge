@@ -282,6 +282,10 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
             else:
                 notes["verdict"] = verdict(run_dir, spec["harness"])
                 print("  -> %s" % ("SUCCESS" if notes["verdict"]["success"] else "failure"))
+        naoqi_falls = sum(1 for r in runner.read_jsonl(run_dir / "calls.jsonl") if r.get("type") == "fall")
+        if naoqi_falls:
+            log("NAOqi reported %d fall(s): ask the operator, then python3 pilot/search.py falls %s N --notes TEXT"
+                % (naoqi_falls, run_dir.name))
         (run_dir / "operator_notes.json").write_text(json.dumps(notes, indent=2))
         if container.openrouter_key:
             # In the background, so that the verdict and the next run need not wait for OpenRouter; a marker file
@@ -332,6 +336,26 @@ def record_verdict(run_name, distance, visible, facing, notes_text, phase):
     notes["verdict_pending"] = False
     notes_file.write_text(json.dumps(notes, indent=2))
     print("%s: %s" % (run_name, "SUCCESS" if notes["verdict"]["success"] else "failure"))
+
+
+def record_falls(run_name, count, notes_text):
+    """The falls the operator saw (Search: the fall count, decided by the author 2026-10-19 after NAOqi reported a fall
+    in search-A7-20261019T103145Z that the operator did not see; pilot/metrics.py uses this count when it is given)."""
+    run_dir = next((d for p in records.PHASES for d in [records.runs_dir(p) / run_name] if d.exists()), None)
+    if run_dir is None:
+        raise SystemExit("no run folder %s" % run_name)
+    notes_file = run_dir / "operator_notes.json"
+    notes = json.loads(notes_file.read_text())
+    if notes.get("falls_observed"):
+        raise SystemExit("%s already has the operator's fall count" % run_name)
+    notes["falls_observed"] = {
+        "count": count,
+        "naoqi_fall_events": sum(1 for r in runner.read_jsonl(run_dir / "calls.jsonl") if r.get("type") == "fall"),
+        "notes": notes_text, "given_via": "chat with the runner's operator",
+        "at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+    notes_file.write_text(json.dumps(notes, indent=2))
+    print("%s: %d fall(s) seen by the operator, %d reported by NAOqi" % (run_name, count,
+                                                                       notes["falls_observed"]["naoqi_fall_events"]))
 
 
 def pending_verdicts(phase):
@@ -386,6 +410,10 @@ def main():
     p.add_argument("--visible", choices=["y", "n"], required=True)
     p.add_argument("--facing", choices=["y", "n"], default="")
     p.add_argument("--notes", default="")
+    p = sub.add_parser("falls", help="the falls the operator saw in a run (when NAOqi reported a fall)")
+    p.add_argument("run")
+    p.add_argument("count", type=int)
+    p.add_argument("--notes", default="")
     p = sub.add_parser("run")
     p.add_argument("agent", choices=AGENT_IDS)
     p.add_argument("--nao-ip", required=True)
@@ -426,6 +454,8 @@ def main():
         operator_end("fault", args.reason)
     elif args.cmd == "verdict":
         record_verdict(args.run, args.distance, args.visible, args.facing, args.notes, None)
+    elif args.cmd == "falls":
+        record_falls(args.run, args.count, args.notes)
     elif args.cmd == "next":
         for path in run_next(args.phase, args.nao_ip, args.count):
             print(path)
