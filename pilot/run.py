@@ -70,7 +70,10 @@ def openrouter_key(agent):
     """The OpenCode agent's own OpenRouter key (agents.json openrouter_key_file; one key per agent since 2026-10-15)."""
     return Path(AGENTS[agent]["openrouter_key_file"]).expanduser().read_text().strip()
 OPENROUTER_KEY_INFO = "https://openrouter.ai/api/v1/key"
-USAGE_FIRST_READ, USAGE_POLL, USAGE_STABLE_READS, USAGE_MAX_WAIT = 60, 10, 3, 4 * 3600  # s, s, reads in a row, s
+USAGE_FIRST_READ, USAGE_POLL, USAGE_STABLE_S, USAGE_MAX_WAIT = 60, 30, 600, 4 * 3600  # s
+# USAGE_STABLE_S 600 (author, 2026-10-19): with 3 equal reads 10 s apart, OpenRouter posted more usage after some runs had
+# settled (pilot/cost_check.py on the pilot: A8's Search run $0.051 on a recorded $0.119), so a pause in posting must last
+# 10 min before the usage counts as settled.
 # 4 h: OpenRouter posted some runs' usage more than 35 min late (Haiku 5.5, 2026-10-15) and others not within 20 min
 # (Complex corridor pilot, 2026-10-15). The wait is in the background and only the same agent's next run waits for it
 # (one key per agent), which in a random order is about 8 runs later.
@@ -396,9 +399,9 @@ def write_opencode_cost(run_dir, key, usage_before, model):
     write_cost_pending(
         run_dir, usage_before, usage_after_usd=usage_after,
         cost_usd=None if usage_after is None else round(usage_after - usage_before, 8), settled=settled, waited_s=waited,
-        settle_rule="unchanged for %d reads %d s apart, after usage - before reached the floor: 0.9 x the token "
+        settle_rule="unchanged for %d s (reads %d s apart), after usage - before reached the floor: 0.9 x the token "
                     "counts at OpenRouter's catalogue prices"
-                    % (USAGE_STABLE_READS, USAGE_POLL),
+                    % (USAGE_STABLE_S, USAGE_POLL),
         settle_floor_usd=round(floor, 8), cross_check_step_costs_usd=steps,
         cross_check_tokens_at_catalogue_price_usd=tokens, catalogue_price_per_token=price)
     log("%s: OpenRouter cost %s" % (run_dir.name, "settled after %d s" % waited if settled else "NOT settled (missing)"))
@@ -434,23 +437,25 @@ def resettle(run_dir):
 def settled_usage(key, before=None, floor=0.0):
     """The key's usage once it has stopped changing. OpenRouter adds a run's requests to the key's usage minutes after
     them, and the usage stays unchanged meanwhile (2026-10-15: nothing after 150 s, still incomplete after 7 min), so
-    "unchanged" counts only once usage - before has reached floor: the sum of the per-request costs OpenRouter
+    "unchanged" (for USAGE_STABLE_S) counts only once usage - before has reached floor: the sum of the per-request costs OpenRouter
     returned to OpenCode (opencode_step_costs, which leaves out the title request). Returns (usage, waited s, settled);
     not settled after USAGE_MAX_WAIT s means the cost is recorded as missing. A read that fails even after its retries
     counts as no read (usage None if no read succeeded)."""
-    started, reads = time.time(), []
+    started, usage, since = time.time(), None, None  # since: the first read of the current value
     time.sleep(USAGE_FIRST_READ - USAGE_POLL)
     while time.time() - started < USAGE_MAX_WAIT:
         time.sleep(USAGE_POLL)
         try:
-            reads.append(openrouter_usage(key))
+            read = openrouter_usage(key)
         except USAGE_READ_ERRORS as e:
             log("OpenRouter usage: no read this time (%r)" % e)
             continue
-        reached = before is None or reads[-1] - before >= floor - 1e-9
-        if reached and len(reads) >= USAGE_STABLE_READS and len(set(reads[-USAGE_STABLE_READS:])) == 1:
-            return reads[-1], round(time.time() - started), True
-    return (reads[-1] if reads else None), round(time.time() - started), False
+        if read != usage:
+            usage, since = read, time.time()
+        reached = before is None or usage - before >= floor - 1e-9
+        if reached and time.time() - since >= USAGE_STABLE_S:
+            return usage, round(time.time() - started), True
+    return usage, round(time.time() - started), False
 
 
 # --- one run -------------------------------------------------------------------------------------------------
