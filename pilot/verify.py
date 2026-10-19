@@ -198,7 +198,7 @@ def attempt(agent, check, fake, check_dir, when=None):
             (folder / "cost.json").write_text(json.dumps({
                 "source": "OpenRouter /api/v1/key usage of the agent's own key, after minus before the attempt",
                 "usage_before_usd": usage_before, "usage_after_usd": usage_after,
-                "cost_usd": round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited,
+                "cost_usd": None if usage_after is None else round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited,
                 "cross_check_step_costs_usd": runner.opencode_step_costs(folder / "agent")}, indent=2))
         price = dict(runner.PRICES[runner.PRICED_MODEL[harness]], model=runner.PRICED_MODEL[harness]) \
             if harness in runner.PRICED_MODEL else None
@@ -274,7 +274,8 @@ def main():
             out = OUT / ("series-cost-%s-%s-%s.json" % (args.when, a, datetime.datetime.now(datetime.timezone.utc)
                                                           .strftime("%Y%m%dT%H%M%SZ")))
             out.write_text(json.dumps({"agent": a, "usage_before_usd": series_before[a], "usage_after_usd": after,
-                                       "cost_usd": round(after - series_before[a], 8), "settled": settled,
+                                       "cost_usd": None if after is None else round(after - series_before[a], 8),
+                                       "settled": settled,
                                        "waited_s": waited, "settle_floor_usd": round(floor, 8)}, indent=2))
             print(out.read_text())
     else:

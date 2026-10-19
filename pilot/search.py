@@ -29,7 +29,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -135,7 +134,11 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
         raise SystemExit("%s runs come only from the run order (search.py next)" % phase)
     spec, prompt = AGENTS[agent], runner.PROTOCOL["prompts"][TASK]
     caps, grace = dict(runner.PROTOCOL["caps"][TASK]), runner.PROTOCOL["grace_period_s"]["value"]
-    # Before any record exists: a start refused here (battery, robot) is no run and leaves nothing in the records.
+    # Before any record exists: a start refused here (battery, robot, an earlier cost, changed code) is no run and
+    # leaves nothing in the records.
+    if spec["harness"] == "opencode" and not fake_script:
+        runner.wait_for_pending_costs(agent)
+    code = runner.runner_code(phase)
     (runner.INSTRUMENTATION / "run_id").unlink(missing_ok=True)
     log("starting a fresh bridge connected to the NAO at %s" % nao_ip)
     bridge_up(nao_ip, simulator_for_test=bool(fake_script))
@@ -161,7 +164,7 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
         "agent_config": spec, "deviations": AGENTS["deviations"][spec["deviations_ref"]],
         "harness_version": runner.LOCK["harness_versions"][runner.HARNESS_KEY[spec["harness"]]],
         "system_commit": runner.git("rev-parse", "HEAD"),
-        "system_uncommitted_changes": bool(runner.git("status", "--porcelain")),
+        "system_uncommitted_changes": bool(runner.git("status", "--porcelain")), "runner_code": code,
         "prompt": prompt, "caps": caps, "grace_period_s": grace, "search_criteria": SPEC,
         "protocol_values_decided": {k: v["decided"] for k, v in runner.PROTOCOL.items()
                                     if isinstance(v, dict) and "decided" in v},
@@ -180,11 +183,6 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
         if spec["harness"] == "agy" and not fake_script and not agy_login_ok(run_id):
             end, invalid = "setup_failure", "the agy login has expired (agy models failed)"
             raise RuntimeError(invalid)
-        if spec["harness"] == "opencode":
-            runner.wait_for_pending_costs(agent)
-            while cost_marker(agent).exists():
-                log("waiting for %s's previous run's cost to settle on OpenRouter (%s)" % (agent, cost_marker(agent).read_text()))
-                time.sleep(30)
         manifest["robot_before"] = {"battery": battery, "posture": state.get("posture"), "fallen": state.get("fallen"),
                                     "awake": state.get("awake")}
         manifest["operator_checklist"] = checklist_given or checklist()
@@ -192,6 +190,7 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
             container.openrouter_key = runner.openrouter_key(agent)
             times["usage_before_read"] = time.time()
             usage_before = runner.openrouter_usage(container.openrouter_key)
+            runner.write_cost_pending(run_dir, usage_before)
         if not chat:
             input("\nPress Enter to start the run (the prompt is submitted right away) ")
         OPERATOR_END.unlink(missing_ok=True)
@@ -287,17 +286,7 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
         if container.openrouter_key:
             # In the background, so that the verdict and the next run need not wait for OpenRouter; a marker file
             # makes the same agent's next run wait, also from another process (search.py start).
-            marker = cost_marker(agent)
-            runner.write_atomic(marker, run_id)
-
-            def settle(key=container.openrouter_key, before=usage_before):
-                try:
-                    runner.write_opencode_cost(run_dir, key, before, spec["model"])
-                finally:
-                    marker.unlink(missing_ok=True)
-            thread = threading.Thread(target=settle)
-            thread.start()
-            runner.PENDING_COSTS.setdefault(agent, []).append(thread)
+            runner.settle_in_background(agent, run_id, run_dir, container.openrouter_key, usage_before, spec["model"])
             log("OpenRouter cost of %s: settling in the background (only %s's next run waits for it)" % (run_id, agent))
         manifest.update({"end_condition": end, "invalid_reason": invalid,
                          "harness_exited_in_grace_period": exited_in_grace,
@@ -314,9 +303,6 @@ def run(agent, phase, nao_ip, slot=None, defer_cost=True, fake_script=None, chec
         log("run folder: %s" % run_dir)
     print("\nPut the robot back at the start pose (and check the ball) before the next run.")
     return run_dir
-
-
-cost_marker = runner.cost_marker
 
 
 OPERATOR_END = runner.INSTRUMENTATION / "operator_end.json"  # written by `search.py intervene|fault` (chat mode)

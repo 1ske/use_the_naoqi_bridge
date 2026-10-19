@@ -30,6 +30,7 @@ allows no host, so no request leaves the machine.
 import argparse
 import datetime
 import hashlib
+import http.client
 import json
 import os
 import shutil
@@ -69,9 +70,21 @@ def openrouter_key(agent):
     """The OpenCode agent's own OpenRouter key (agents.json openrouter_key_file; one key per agent since 2026-10-15)."""
     return Path(AGENTS[agent]["openrouter_key_file"]).expanduser().read_text().strip()
 OPENROUTER_KEY_INFO = "https://openrouter.ai/api/v1/key"
-USAGE_FIRST_READ, USAGE_POLL, USAGE_STABLE_READS, USAGE_MAX_WAIT = 60, 10, 3, 3600  # s, s, reads in a row, s
-# 3600 s: OpenRouter posted some runs' usage more than 35 min late (Haiku 5.5, 2026-10-15). The wait is in the background
-# and only the same agent's next run waits for it (one key per agent), which in a random order is about 8 runs later.
+USAGE_FIRST_READ, USAGE_POLL, USAGE_STABLE_READS, USAGE_MAX_WAIT = 60, 10, 3, 4 * 3600  # s, s, reads in a row, s
+# 4 h: OpenRouter posted some runs' usage more than 35 min late (Haiku 5.5, 2026-10-15) and others not within 20 min
+# (Complex corridor pilot, 2026-10-15). The wait is in the background and only the same agent's next run waits for it
+# (one key per agent), which in a random order is about 8 runs later.
+USAGE_READ_RETRIES = (5, 15, 45)  # s before each further attempt of one usage read
+USAGE_READ_ERRORS = (OSError, ValueError, KeyError, TypeError, http.client.HTTPException)
+
+
+def runner_files():
+    """sha256 of the runner's code and config: pilot/*.py, pilot/config/*.json, pilot/images.lock.json."""
+    files = [*(REPO / "pilot").glob("*.py"), *(REPO / "pilot" / "config").glob("*.json"), REPO / "pilot" / "images.lock.json"]
+    return {str(f.relative_to(REPO)): hashlib.sha256(f.read_bytes()).hexdigest() for f in files if f.exists()}
+
+
+RUNNER_FILES_AT_START = runner_files()
 T0_TIMEOUT = 120  # s from container start; OpenCode alone waits up to 60 s for the MCP server
 
 
@@ -245,9 +258,18 @@ def stage_agy_fake_settings(container):
 
 # --- cost of OpenCode runs: the shared OpenRouter key's usage before and after the run ---------------------------
 def openrouter_usage(key):
+    """The key's usage (USD). A failed read is tried again (2026-10-15: an SSL handshake timeout and a connection reset
+    each ended a cost thread); raises after the last attempt."""
     request = urllib.request.Request(OPENROUTER_KEY_INFO, headers={"Authorization": "Bearer " + key})
-    with urllib.request.urlopen(request, timeout=15) as response:
-        return float(json.loads(response.read())["data"]["usage"])
+    for pause in (*USAGE_READ_RETRIES, None):
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                return float(json.loads(response.read())["data"]["usage"])
+        except USAGE_READ_ERRORS as e:
+            if pause is None:
+                raise
+            log("OpenRouter usage read failed (%r); again in %d s" % (e, pause))
+            time.sleep(pause)
 
 
 def opencode_step_costs(agent_dir):
@@ -273,12 +295,22 @@ def cost_marker(agent):
     return INSTRUMENTATION / ("cost-pending-%s" % agent)
 
 
+def unsettled_marker(agent):
+    """Exists when one of the agent's runs' costs did not settle (holds its run ID): until `run.py resettle` settles it,
+    the agent's next run would count the rest of that cost, so it does not start."""
+    return INSTRUMENTATION / ("cost-unsettled-%s" % agent)
+
+
 def wait_for_pending_costs(agent=None):
     """Before an OpenCode run reads its agent's key's usage: that agent's earlier runs' usage has settled, so that the
-    run's window on the key holds only that run. agent None: wait for all."""
+    run's window on the key holds only that run (raises SystemExit if one did not settle). agent None: wait for all."""
     for a in [agent] if agent else []:
-        while cost_marker(a).exists():
-            log("waiting for %s's previous run's cost to settle on OpenRouter (%s)" % (a, cost_marker(a).read_text()))
+        while True:
+            try:
+                pending = cost_marker(a).read_text()
+            except FileNotFoundError:  # also when it is removed meanwhile
+                break
+            log("waiting for %s's previous run's cost to settle on OpenRouter (%s)" % (a, pending))
             time.sleep(30)
     for a in [agent] if agent else list(PENDING_COSTS):
         threads = PENDING_COSTS.get(a, [])
@@ -287,6 +319,46 @@ def wait_for_pending_costs(agent=None):
             if thread.is_alive():
                 log("waiting for %s's previous run's cost to settle on OpenRouter" % a)
             thread.join()
+    for a in [agent] if agent else []:
+        try:
+            unsettled = unsettled_marker(a).read_text().strip()
+        except FileNotFoundError:
+            continue
+        raise SystemExit("%s: the OpenRouter cost of its previous run %s did not settle, and a run now would count the "
+                         "rest of it; not started. Settle it first: python3 pilot/run.py resettle <its run folder> "
+                         "(removing %s instead leaves both runs' costs mixed)" % (a, unsettled, unsettled_marker(a)))
+
+
+def write_cost_pending(run_dir, usage_before, **extra):
+    """cost.json as soon as the usage before the run is read, so that `run.py resettle` can settle the cost even if
+    the settling stops (runner killed, error)."""
+    (run_dir / "cost.json").write_text(json.dumps(dict({
+        "source": "OpenRouter /api/v1/key usage of the agent's own key (agents.json openrouter_key_file), after minus "
+                  "before the run",
+        "usage_before_usd": usage_before, "usage_after_usd": None, "cost_usd": None, "settled": False}, **extra),
+        indent=2))
+
+
+def settle_in_background(agent, run_id, run_dir, key, usage_before, model):
+    """Settle an OpenCode run's cost in a background thread (PENDING_COSTS). The agent's marker file makes its next run
+    wait, also in another runner process; if the cost does not settle, the unsettled marker stops that next run."""
+    marker = cost_marker(agent)
+    write_atomic(marker, run_id)
+
+    def settle():
+        settled = False
+        try:
+            settled = write_opencode_cost(run_dir, key, usage_before, model)
+        except BaseException as e:
+            log("%s: OpenRouter cost NOT settled (missing): %r" % (run_id, e))
+            write_cost_pending(run_dir, usage_before, error=repr(e))
+        finally:
+            if not settled:
+                write_atomic(unsettled_marker(agent), run_id)
+            marker.unlink(missing_ok=True)
+    thread = threading.Thread(target=settle)
+    thread.start()
+    PENDING_COSTS.setdefault(agent, []).append(thread)
 
 
 def opencode_token_floor(agent_dir, model):
@@ -321,17 +393,16 @@ def write_opencode_cost(run_dir, key, usage_before, model):
     # and Gemini 3.8 Flash (and are 0 for Haiku 5.5) in the Search pilot, 2026-10-15, so they could not be reached.
     floor = 0.9 * tokens
     usage_after, waited, settled = settled_usage(key, usage_before, floor)
-    (run_dir / "cost.json").write_text(json.dumps({
-        "source": "OpenRouter /api/v1/key usage of the agent's own key (agents.json openrouter_key_file), after minus "
-                  "before the run",
-        "usage_before_usd": usage_before, "usage_after_usd": usage_after,
-        "cost_usd": round(usage_after - usage_before, 8), "settled": settled, "waited_s": waited,
-        "settle_rule": "unchanged for %d reads %d s apart, after usage - before reached the floor: 0.9 x the token "
-                       "counts at OpenRouter's catalogue prices"
-                       % (USAGE_STABLE_READS, USAGE_POLL),
-        "settle_floor_usd": round(floor, 8), "cross_check_step_costs_usd": steps,
-        "cross_check_tokens_at_catalogue_price_usd": tokens, "catalogue_price_per_token": price}, indent=2))
+    write_cost_pending(
+        run_dir, usage_before, usage_after_usd=usage_after,
+        cost_usd=None if usage_after is None else round(usage_after - usage_before, 8), settled=settled, waited_s=waited,
+        settle_rule="unchanged for %d reads %d s apart, after usage - before reached the floor: 0.9 x the token "
+                    "counts at OpenRouter's catalogue prices"
+                    % (USAGE_STABLE_READS, USAGE_POLL),
+        settle_floor_usd=round(floor, 8), cross_check_step_costs_usd=steps,
+        cross_check_tokens_at_catalogue_price_usd=tokens, catalogue_price_per_token=price)
     log("%s: OpenRouter cost %s" % (run_dir.name, "settled after %d s" % waited if settled else "NOT settled (missing)"))
+    return settled
 
 
 def resettle(run_dir):
@@ -349,10 +420,15 @@ def resettle(run_dir):
         if o.get("agent") == agent and other.parent != run_dir and before and before > end:
             raise SystemExit("%s: %s's key was used again by %s; this cost stays missing" % (run_dir.name, agent, o["run_id"]))
     first = dict(cost)
-    write_opencode_cost(run_dir, openrouter_key(agent), cost["usage_before_usd"], manifest["agent_config"]["model"])
+    settled = write_opencode_cost(run_dir, openrouter_key(agent), cost["usage_before_usd"],
+                                  manifest["agent_config"]["model"])
     new = json.loads((run_dir / "cost.json").read_text())
     new["resettled"] = {"at": utc(time.time()), "first_attempt": first}
     (run_dir / "cost.json").write_text(json.dumps(new, indent=2))
+    marker = unsettled_marker(agent)
+    if settled and marker.exists() and marker.read_text().strip() == run_dir.name:
+        marker.unlink()
+        log("%s's next run can start" % agent)
 
 
 def settled_usage(key, before=None, floor=0.0):
@@ -360,21 +436,48 @@ def settled_usage(key, before=None, floor=0.0):
     them, and the usage stays unchanged meanwhile (2026-10-15: nothing after 150 s, still incomplete after 7 min), so
     "unchanged" counts only once usage - before has reached floor: the sum of the per-request costs OpenRouter
     returned to OpenCode (opencode_step_costs, which leaves out the title request). Returns (usage, waited s, settled);
-    not settled after USAGE_MAX_WAIT s means the cost is recorded as missing."""
+    not settled after USAGE_MAX_WAIT s means the cost is recorded as missing. A read that fails even after its retries
+    counts as no read (usage None if no read succeeded)."""
     started, reads = time.time(), []
     time.sleep(USAGE_FIRST_READ - USAGE_POLL)
     while time.time() - started < USAGE_MAX_WAIT:
         time.sleep(USAGE_POLL)
-        reads.append(openrouter_usage(key))
+        try:
+            reads.append(openrouter_usage(key))
+        except USAGE_READ_ERRORS as e:
+            log("OpenRouter usage: no read this time (%r)" % e)
+            continue
         reached = before is None or reads[-1] - before >= floor - 1e-9
         if reached and len(reads) >= USAGE_STABLE_READS and len(set(reads[-USAGE_STABLE_READS:])) == 1:
             return reads[-1], round(time.time() - started), True
-    return reads[-1], round(time.time() - started), False
+    return (reads[-1] if reads else None), round(time.time() - started), False
 
 
 # --- one run -------------------------------------------------------------------------------------------------
 def git(*args):
     return subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, text=True).stdout.strip()
+
+
+RUNNER_COMMIT_AT_START = git("rev-parse", "HEAD")
+RUNNER_UNCOMMITTED_AT_START = bool(git("status", "--porcelain"))
+
+
+def runner_code(phase):
+    """The commit this runner process started from, and the runner files it has loaded (pilot modules, config) that
+    changed on disk since. A pilot or main run does not start with changed files (2026-10-15: a fix committed during a
+    session did not apply to the running process, and its runs' system_commit named the fix): start the runner again."""
+    now = runner_files()
+    loaded = {str(Path(m.__file__).resolve().relative_to(REPO)) for m in list(sys.modules.values())
+              if getattr(m, "__file__", None) and Path(m.__file__).resolve().parent == REPO / "pilot"}
+    changed = sorted(f for f, sha in RUNNER_FILES_AT_START.items()
+                     if (f in loaded or not f.endswith(".py")) and now.get(f) != sha)
+    if changed and phase != "test":
+        raise SystemExit("runner files changed since this process started (%s): start the runner again so that the "
+                         "change applies; not started" % ", ".join(changed))
+    if changed:
+        log("WARNING: runner files changed since this process started (%s); recorded in the manifest" % ", ".join(changed))
+    return {"commit_at_start": RUNNER_COMMIT_AT_START, "uncommitted_changes_at_start": RUNNER_UNCOMMITTED_AT_START,
+            "changed_since_start": changed}
 
 
 def preflight(agent, phase, fake_script):
@@ -401,6 +504,11 @@ def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None, 
     spec, world = AGENTS[agent], WORLDS["worlds"][task]
     prompt = PROTOCOL["prompts"][task]
     caps, grace = dict(PROTOCOL["caps"][task], **(test_caps or {})), PROTOCOL["grace_period_s"]["value"]
+    # Before any record exists and before the reset (the simulator does not idle at the start pose meanwhile), so that a
+    # run refused here leaves nothing in the records; the code check after the wait, which can be long.
+    if spec["harness"] == "opencode" and not fake_script:
+        wait_for_pending_costs(agent)
+    code = runner_code(phase)
     started = time.time()
     run_id = "%s-%s-%s%s" % (task, agent, datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
                              "-test" if fake_script else "")
@@ -416,6 +524,7 @@ def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None, 
         "agent_config": spec, "deviations": AGENTS["deviations"][spec["deviations_ref"]],
         "harness_version": LOCK["harness_versions"][HARNESS_KEY[spec["harness"]]],
         "system_commit": git("rev-parse", "HEAD"), "system_uncommitted_changes": bool(git("status", "--porcelain")),
+        "runner_code": code,
         "world_file": world["file"], "world_sha256": hashlib.sha256(world_file.read_bytes()).hexdigest(),
         "prompt": prompt, "caps": caps, "grace_period_s": grace,
         "protocol_values_decided": {k: v["decided"] for k, v in PROTOCOL.items() if isinstance(v, dict) and "decided" in v},
@@ -437,13 +546,12 @@ def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None, 
         if spec["harness"] == "agy" and not fake_script and not agy_login_ok(run_id):
             end, invalid = "setup_failure", "the agy login has expired (agy models failed)"
             raise RuntimeError(invalid)
-        if spec["harness"] == "opencode" and not fake_script:
-            wait_for_pending_costs(agent)  # before the reset, so that the simulator does not idle at the start pose
         supervisor = reset(run_id, world)
         if spec["harness"] == "opencode" and not fake_script:
             container.openrouter_key = openrouter_key(agent)
             times["usage_before_read"] = time.time()
             usage_before = openrouter_usage(container.openrouter_key)
+            write_cost_pending(run_dir, usage_before)
         container.bridge = compose(REPO, "ps", "-q", "bridge")
         container.setup_network()
         if fake_script:
@@ -517,20 +625,11 @@ def run(agent, task, phase="test", slot=None, fake_script=None, test_caps=None, 
         if container.openrouter_key:
             if defer_cost:
                 log("OpenRouter cost: settling in the background (only %s's next run waits for it)" % agent)
-                marker = cost_marker(agent)
-                write_atomic(marker, run_id)
-
-                def settle(key=container.openrouter_key, before=usage_before):
-                    try:
-                        write_opencode_cost(run_dir, key, before, spec["model"])
-                    finally:
-                        marker.unlink(missing_ok=True)
-                thread = threading.Thread(target=settle)
-                thread.start()
-                PENDING_COSTS.setdefault(agent, []).append(thread)
+                settle_in_background(agent, run_id, run_dir, container.openrouter_key, usage_before, spec["model"])
             else:
                 log("waiting for OpenRouter's usage of the key to settle")
-                write_opencode_cost(run_dir, container.openrouter_key, usage_before, spec["model"])
+                if not write_opencode_cost(run_dir, container.openrouter_key, usage_before, spec["model"]):
+                    write_atomic(unsettled_marker(agent), run_id)
         check = transcript_check.check(agent, run_dir / "agent")
         (run_dir / "transcript_check.json").write_text(json.dumps(check, indent=2))
         if not check["transcript_found"] and not invalid:
