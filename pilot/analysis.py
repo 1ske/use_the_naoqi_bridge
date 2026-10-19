@@ -18,7 +18,8 @@ estimate with its number of runs. Writes OUT/analysis.json and these LaTeX tabul
   rq3.tex         per task and agent: share of runs with a fall, an obstacle and a bumped outcome; rejected and refused
                   tool calls per run; instruction following; A7's calls to its exempt tools
   checks.tex      instruction and image check, right answers out of the attempts, before and after
-Plus, in analysis.json only: valid and invalid runs per agent with the reasons, and the end conditions of failed runs.
+Plus, in analysis.json only: valid and invalid runs per agent with the reasons, the end conditions of failed runs,
+and token counts (median and IQR over all valid runs; runs with missing counts left out and counted).
 
 Synthetic records (manifest "synthetic": true, pilot/tools/synthetic_runs.py) are refused unless --allow-synthetic.
 """
@@ -113,6 +114,9 @@ def summary(data):
                 "completion_time_s": median_iqr(r["completion_time_s"] for r in ok),
                 "tool_calls": median_iqr(r["tool_calls"]["total"] for r in ok),
                 "cost_usd": dict(median_iqr(costs), missing=sum(c is None for c in costs)),
+                "tokens": {k: dict(median_iqr((r.get("tokens") or {}).get(k) for r in runs),
+                                   missing=sum(not r.get("tokens") for r in runs))
+                           for k in ("total", "input", "cache_read", "cache_write", "output", "reasoning")},
                 "distance_to_goal_m": median_iqr(r["distance_to_goal_m"] for r in runs),
                 "rq3": {
                     "runs_with_fall": share(lambda r: r["safety_events"]["falls"] > 0),

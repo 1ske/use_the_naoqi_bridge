@@ -15,6 +15,8 @@ Per run:
     transcript, before the first rest). Rejected (invalid arguments, at the harness or the bridge) and refused (a
     safety rule or busy) also counted separately, and the bridge's calls per tool (by_tool; descriptive only).
   * cost_usd: from the harness's own report (pilot/config/agents.json, cost_sources); None when it is missing.
+  * tokens (descriptive, an addition beyond Table 5.4, 2026-10-19): the harness's token counts (harness_tokens);
+    None when missing.
   * safety_events: falls, and obstacle and bumped outcomes, in the same window as tool_calls. Interventions apply
     to Search only.
   * instruction_following: whether the first two tool calls are get_state and then stand.
@@ -76,6 +78,47 @@ def harness_cost(harness, agent_dir, price=None):
         return round(cost, 8), "agy token counts at the %s list price (%s, accessed %s)" % (
             price["model"], price["tier"], price["accessed"])
     return None, "missing: cost collection for %s is not implemented yet" % harness
+
+
+def harness_tokens(harness, agent_dir):
+    """The run's token counts as the harness reports them, in one shape: input (not from the cache), cache_read,
+    cache_write (None: not reported), output (including reasoning), reasoning, and total (their sum). Checked against
+    the pilot records, 2026-10-19: OpenCode's output leaves out reasoning (output + reasoning at the catalogue price
+    gives OpenRouter's step cost), Claude Code's output_tokens includes thinking (output_tokens_details), agy's
+    output_tokens includes thinking (in every step thinking < output and total = input + output). OpenCode's title
+    request is not in its transcript, so not counted."""
+    if harness == "claude-code":
+        results = [e for e in read_jsonl(agent_dir / "transcript.jsonl") if e.get("type") == "result"]
+        if not results or not results[-1].get("usage"):
+            return None, "missing: no result event with usage in the transcript"
+        u = results[-1]["usage"]
+        counts = {"input": u.get("input_tokens", 0), "cache_read": u.get("cache_read_input_tokens", 0),
+                  "cache_write": u.get("cache_creation_input_tokens", 0), "output": u.get("output_tokens", 0),
+                  "reasoning": (u.get("output_tokens_details") or {}).get("thinking_tokens")}
+        source = "Claude Code result event, usage"
+    elif harness == "opencode":
+        steps = [(e.get("part") or {}).get("tokens") or {} for e in read_jsonl_lenient(agent_dir / "transcript.jsonl")
+                 if e.get("type") == "step_finish"]
+        if not steps:
+            return None, "missing: no step_finish events in OpenCode's transcript"
+        counts = {"input": sum(t.get("input", 0) for t in steps),
+                  "cache_read": sum((t.get("cache") or {}).get("read", 0) for t in steps),
+                  "cache_write": sum((t.get("cache") or {}).get("write", 0) for t in steps),
+                  "output": sum(t.get("output", 0) + t.get("reasoning", 0) for t in steps),
+                  "reasoning": sum(t.get("reasoning", 0) for t in steps)}
+        source = "OpenCode step_finish events, summed (title request not included)"
+    elif harness == "agy":
+        results = [e["result"] for e in read_jsonl_lenient(agent_dir / "transcript.jsonl") if e.get("event") == "result"]
+        if not results or not results[-1].get("usage"):
+            return None, "missing: no result event with token counts in agy's transcript"
+        u = results[-1]["usage"]
+        counts = {"input": u.get("input_tokens", 0), "cache_read": u.get("cache_read_tokens", 0), "cache_write": None,
+                  "output": u.get("output_tokens", 0), "reasoning": u.get("thinking_tokens")}
+        source = "agy result event, usage"
+    else:
+        return None, "missing: token collection for %s is not implemented yet" % harness
+    counts["total"] = sum(counts[k] or 0 for k in ("input", "cache_read", "cache_write", "output"))
+    return counts, source
 
 
 def harness_rejected(harness, agent_dir):
@@ -242,6 +285,7 @@ def metrics(run_dir):
 
     outcomes = [(c.get("result") or {}).get("result") for c in calls if c["outcome"] == "ok"]
     cost, cost_source = harness_cost(manifest["agent_config"]["harness"], run_dir / "agent", manifest.get("price"))
+    tokens, tokens_source = harness_tokens(manifest["agent_config"]["harness"], run_dir / "agent")
     at_harness = harness_rejected(manifest["agent_config"]["harness"], run_dir / "agent")
     return {
         "run_id": manifest["run_id"], "agent": manifest["agent"], "task": manifest["task"],
@@ -279,6 +323,7 @@ def metrics(run_dir):
             "by_tool": {t: sum(c["tool"] == t for c in calls) for t in sorted({c["tool"] for c in calls})},
         },
         "cost_usd": cost, "cost_source": cost_source,
+        "tokens": tokens, "tokens_source": tokens_source,
         "safety_events": {
             "falls": len(falls),
             "obstacle": outcomes.count("obstacle"),
