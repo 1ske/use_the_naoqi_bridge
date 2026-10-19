@@ -64,6 +64,11 @@ def harness_cost(harness, agent_dir, price=None):
             return None, "missing: no cost.json (OpenRouter usage not read)"
         cost = json.loads(cost_file.read_text())
         if not cost["settled"]:
+            if cost.get("error"):
+                return None, "missing: the settling stopped with an error (%s); run.py resettle" % cost["error"]
+            if cost.get("waited_s") is None:  # cost.json as written at the start of the run (run.py write_cost_pending)
+                return None, "missing for now: OpenRouter's usage is still settling (or the settling stopped; " \
+                             "run.py resettle)"
             return None, "missing: OpenRouter's usage did not settle within %d s" % cost["waited_s"]
         return cost["cost_usd"], cost.get("source", "OpenRouter key usage, after minus before the run")
     if harness == "agy":
