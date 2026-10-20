@@ -116,10 +116,11 @@ def verdict(run_dir, harness):
               "more than %.1f m):" % SPEC["max_distance_m"])
     distance = None if raw == ">" else float(raw.replace(",", "."))
     visible = ask("Is part of the ball visible in the image of rest's tool result?", ["y", "n"]) == "y"
-    facing = ask("Is the robot facing the ball (for the notes; not a criterion)?", ["y", "n"])
+    facing = ask("Is the robot facing the ball (in front of it, in the bottom camera's view or under it)?", ["y", "n"])
     notes = ask("Notes (optional):")
     within = distance is not None and distance <= SPEC["max_distance_m"]
-    success = within and (visible or not SPEC["require_ball_visible_in_rest_image"])
+    success = within and (visible or not SPEC["require_ball_visible_in_rest_image"]) and (
+        facing == "y" or not SPEC.get("require_facing_ball"))
     return {"distance_to_ball_m": distance, "within_distance": within, "ball_visible_in_rest_image": visible,
             "rest_image": str(image) if image else None, "rest_image_identified": from_rest, "facing_ball": facing,
             "success": success, "criteria": dict(SPEC), "notes": notes,
@@ -330,7 +331,8 @@ def record_verdict(run_name, distance, visible, facing, notes_text, phase):
     vis = visible == "y"
     notes["verdict"] = {"distance_to_ball_m": d, "within_distance": within, "ball_visible_in_rest_image": vis,
                         "rest_image": notes.get("rest_image"), "rest_image_identified": notes.get("rest_image_identified"),
-                        "facing_ball": facing, "success": within and (vis or not SPEC["require_ball_visible_in_rest_image"]),
+                        "facing_ball": facing, "success": within and (vis or not SPEC["require_ball_visible_in_rest_image"])
+                        and (facing == "y" or not SPEC.get("require_facing_ball")),
                         "criteria": dict(SPEC), "notes": notes_text, "given_via": "chat with the runner's operator",
                         "judged_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
     notes["verdict_pending"] = False

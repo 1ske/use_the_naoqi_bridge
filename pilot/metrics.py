@@ -262,7 +262,7 @@ def metrics(run_dir):
         if verdict:  # recomputed from the recorded facts under the current criteria (protocol.json, search)
             verdict = dict(verdict, success=bool(verdict["within_distance"] and (
                 verdict["ball_visible_in_rest_image"] or not PROTOCOL["search"]["require_ball_visible_in_rest_image"])
-                and not verdict.get("author_ruling_failure")))  # protocol.json search _decided_2026_10_20
+                and (verdict.get("facing_ball") == "y" or not PROTOCOL["search"].get("require_facing_ball"))))
     else:
         verdict = success.verdict(manifest["task_key"], ground_truth) if normal_end else None
     succeeded = bool(verdict and verdict["success"]) and not check["protocol_violation"]
