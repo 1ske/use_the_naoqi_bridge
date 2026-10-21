@@ -13,6 +13,11 @@ stored in the order file with the Python version, so that the order can be redra
 redraws the positions after N (which must all be open) with a new seed, keeping positions 1..N; the previous order
 file is kept as TASK.rev<k>.json and the revision is recorded in the new file.
 
+    python3 pilot/order.py extend PHASE TASK --blocks N --reason TEXT
+
+adds blocks after the last one (more runs per agent), drawn with a new seed; every existing position is kept, as in
+redraw-open (a revision with previous_blocks).
+
 History: from 2026-10-15 12:21 until the end of that day's Corridor pilot, orders were drawn with a restriction
 (no OpenCode run directly after another, also across blocks; METHOD_RESTRICTED), while all OpenCode agents shared one
 OpenRouter key. With one key per OpenCode agent the restriction was dropped (author, 2026-10-15); `verify` still
@@ -110,10 +115,13 @@ def new(phase, task, blocks, seed=None):
     return path
 
 
-def redraw_open(phase, task, keep_through, reason, seed=None):
-    """Keep positions 1..keep_through, redraw the rest under the restriction with a new seed (see the module doc)."""
+def redraw_open(phase, task, keep_through, reason, seed=None, blocks=None):
+    """Keep positions 1..keep_through, redraw the rest with a new seed, up to blocks (default: as before)."""
     path = records.order_file(phase, task)
     old = load(phase, task)
+    blocks = old["blocks"] if blocks is None else blocks
+    if blocks < old["blocks"]:
+        raise SystemExit("the order has %d blocks; blocks are never removed" % old["blocks"])
     tried = attempts(phase, task)
     later = sorted(p for p in tried if p > keep_through)
     if later:
@@ -125,11 +133,12 @@ def redraw_open(phase, task, keep_through, reason, seed=None):
     seed_source = "given on the command line" if seed is not None else "secrets.randbits(64)"
     seed = secrets.randbits(64) if seed is None else seed
     fixed = old["order"][:keep_through]
-    new_order = dict(old, seed=seed, seed_source=seed_source, method=METHOD, python=platform.python_version(),
-                     order=draw(seed, old["agents"], old["blocks"], fixed))
+    new_order = dict(old, blocks=blocks, seed=seed, seed_source=seed_source, method=METHOD,
+                     python=platform.python_version(), order=draw(seed, old["agents"], blocks, fixed))
     new_order["revisions"] = old.get("revisions", []) + [{
         "revision": k, "previous_file": path.with_name("%s.rev%d.json" % (task, k)).name,
-        "previous_seed": old["seed"], "previous_method": old["method"], "kept_positions": keep_through,
+        "previous_seed": old["seed"], "previous_method": old["method"], "previous_blocks": old["blocks"],
+        "kept_positions": keep_through,
         "reason": reason, "at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "system_commit": subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"], capture_output=True,
                                         text=True).stdout.strip()}]
@@ -208,6 +217,12 @@ def main():
     p.add_argument("--keep-through", type=int, required=True)
     p.add_argument("--reason", required=True)
     p.add_argument("--seed", type=int)
+    p = sub.add_parser("extend")
+    p.add_argument("phase", choices=records.PHASES)
+    p.add_argument("task", choices=TASKS)
+    p.add_argument("--blocks", type=int, required=True, help="runs per agent on this task, after the extension")
+    p.add_argument("--reason", required=True)
+    p.add_argument("--seed", type=int)
     for name in ("status", "verify"):
         p = sub.add_parser(name)
         p.add_argument("phase", choices=records.PHASES)
@@ -217,6 +232,11 @@ def main():
         print(new(args.phase, args.task, args.blocks, args.seed))
     elif args.cmd == "redraw-open":
         print(redraw_open(args.phase, args.task, args.keep_through, args.reason, args.seed))
+    elif args.cmd == "extend":
+        old = load(args.phase, args.task)
+        if args.blocks <= old["blocks"]:
+            raise SystemExit("the order already has %d blocks" % old["blocks"])
+        print(redraw_open(args.phase, args.task, len(old["order"]), args.reason, args.seed, args.blocks))
     elif args.cmd == "verify":
         order = load(args.phase, args.task)
         kept = order["revisions"][-1]["kept_positions"] if order.get("revisions") else 0
