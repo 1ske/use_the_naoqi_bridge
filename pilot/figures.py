@@ -8,14 +8,17 @@
 
 Uses the valid, non-excluded runs of the phase and pilot/analysis.py's numbers (which also writes the tables). The
 agents are drawn as the grid of section 5.1.5: the two agents of a harness pair (same LLM) side by side, the native
-harness as a filled marker, OpenCode as an open one. Writes to OUT (default ~/.naoqi-pilot/grid/PHASE/figures):
+harness as a filled marker, OpenCode as an open one. The simulated tasks and Search (physical NAO) are never drawn in
+one figure, since their results are not compared (section 1.4). Writes to OUT (default ~/.naoqi-pilot/grid/PHASE/figures):
   PREFIXsuccess.pdf    success rate with a 95 % Wilson score interval, one panel per simulated task
-  PREFIXcost.pdf       success rate against median cost per run, one panel per task; the four harness pairs joined
-  PREFIXtime.pdf       completion time of every successful run, with the median, one panel per task
+  PREFIXcost.pdf       success rate against median cost per run, one panel per simulated task; the harness pairs joined
+  PREFIXtime.pdf       completion time of every successful run, with the median, one panel per simulated task
+  PREFIXsuccess-search.pdf, PREFIXcost-search.pdf, PREFIXtime-search.pdf   the same for Search, one panel
   PREFIXpaths-TASK.pdf the torso's path on the floor plan, one panel per agent (rows: LLM, columns: native harness,
                        OpenCode); runs without a recorded path show only the pose at rest; for describing failures
   PREFIXtools-TASK.pdf per category (each tool, obstacle outcomes, falls, refused and rejected calls), every
-                       agent's runs side by side in run order, pairs grouped; descriptive, not a metric
+                       agent's runs side by side in run order, pairs grouped; descriptive, not a metric; also Search
+                       (falls: the operator's count)
 """
 import argparse
 import math
@@ -37,7 +40,8 @@ import dashboard  # noqa: E402
 import records  # noqa: E402
 from agent_container import AGENT_IDS, AGENTS  # noqa: E402
 
-TASKS = analysis.TASKS
+SIM_TASKS = analysis.SIM_TASKS
+SEARCH = analysis.SEARCH
 PAIRS = analysis.PAIRS  # (native, OpenCode), C3-C6
 LLM_SHORT = {a: AGENTS[a]["llm"].replace("Claude ", "") for a in AGENT_IDS}
 HARNESS = {"claude-code": "Claude Code", "opencode": "OpenCode", "agy": "Antigravity"}
@@ -52,6 +56,13 @@ plt.rcParams.update({
     "axes.spines.right": False, "pdf.fonttype": 42, "savefig.bbox": "tight", "savefig.pad_inches": 0.02,
 })
 WIDTH = 6.0  # inches, about the text width of the thesis
+
+
+def panels(tasks, height):
+    """One panel per task, side by side and sharing the agent axis; a single panel (Search) is narrower."""
+    fig, axes = plt.subplots(1, len(tasks), figsize=(WIDTH if len(tasks) > 1 else 0.6 * WIDTH, height), sharey=True,
+                             squeeze=False)
+    return fig, list(axes[0])
 # Row of each agent: the pairs one after the other, with a gap between pairs.
 ROW = {a: 3 * i + j for i, pair in enumerate(PAIRS) for j, a in enumerate(pair)}
 
@@ -86,9 +97,9 @@ def agent_axis(ax, labels=True):
                         xytext=(-78, 0), textcoords="offset points", ha="right", va="center", color=INK, fontsize=8)
 
 
-def fig_success(result, path):
-    fig, axes = plt.subplots(1, 2, figsize=(WIDTH, 2.8), sharey=True)
-    for ax, (key, name) in zip(axes, TASKS):
+def fig_success(result, tasks, path):
+    fig, axes = panels(tasks, 2.8)
+    for ax, (key, name) in zip(axes, tasks):
         for a in AGENT_IDS:
             s = result["summary"][key][a]
             if not s["n"]:
@@ -147,9 +158,9 @@ def place_labels(ax, groups, pts):
                     color=INK_2)
 
 
-def fig_cost(result, path):
-    fig, axes = plt.subplots(1, 2, figsize=(WIDTH, 2.6), sharey=True)
-    for ax, (key, name) in zip(axes, TASKS):
+def fig_cost(result, tasks, path):
+    fig, axes = panels(tasks, 2.6)
+    for ax, (key, name) in zip(axes, tasks):
         pts = {}
         for a in AGENT_IDS:
             s = result["summary"][key][a]
@@ -180,15 +191,16 @@ def fig_cost(result, path):
     fig.legend([Line2D([], [], **marker(PAIRS[0][0])), Line2D([], [], **marker(PAIRS[0][1])),
                 Line2D([], [], color=MUTED, linewidth=1, linestyle=(0, (3, 2)))],
                ["native harness", "OpenCode", "same LLM (C3: A1, A2; C4: A3, A4; C5: A5, A6; C6: A7, A8)"],
-               loc="upper right", bbox_to_anchor=(1, 1.08), frameon=False, ncol=3)
+               frameon=False, **(dict(loc="upper right", bbox_to_anchor=(1, 1.08), ncol=3) if len(tasks) > 1
+                                  else dict(loc="upper center", bbox_to_anchor=(0.5, 0), ncol=1)))
     fig.subplots_adjust(wspace=0.15)
     fig.savefig(path)
     plt.close(fig)
 
 
-def fig_time(result, data, path):
-    fig, axes = plt.subplots(1, 2, figsize=(WIDTH, 2.8), sharey=True)
-    for ax, (key, name) in zip(axes, TASKS):
+def fig_time(result, data, tasks, path):
+    fig, axes = panels(tasks, 2.8)
+    for ax, (key, name) in zip(axes, tasks):
         top = 0
         for a in AGENT_IDS:
             times = sorted(r["completion_time_s"] for r in data.get((key, a), []) if r["task_success"])
@@ -318,11 +330,13 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     result, data = analysis.analyse(args.phase, args.runs, args.allow_synthetic)
     p = lambda name: out / (args.prefix + name)  # noqa: E731
-    fig_success(result, p("success.pdf"))
-    fig_cost(result, p("cost.pdf"))
-    fig_time(result, data, p("time.pdf"))
-    for key, _ in TASKS:
+    for tasks, suffix in ((SIM_TASKS, ""), (SEARCH, "-search")):
+        fig_success(result, tasks, p("success%s.pdf" % suffix))
+        fig_cost(result, tasks, p("cost%s.pdf" % suffix))
+        fig_time(result, data, tasks, p("time%s.pdf" % suffix))
+    for key, _ in SIM_TASKS:  # Search has no recorded path
         fig_paths(result, data, key, p("paths-%s.pdf" % key.replace("_", "-")))
+    for key, _ in SIM_TASKS + SEARCH:
         fig_tools(data, key, p("tools-%s.pdf" % key.replace("_", "-")))
     print(out)
 

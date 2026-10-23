@@ -8,15 +8,18 @@
 
 Uses the valid, non-excluded runs of the phase (test: only to check the instrumentation itself; test runs are never
 part of the pilot or the main runs) (pilot/records.py, pilot/metrics.py), each task separately, every
-estimate with its number of runs. Writes OUT/analysis.json and these LaTeX tabulars (\\input them inside a table):
+estimate with its number of runs. Search, on the physical NAO, is reported descriptively: in every output except
+tests.tex and distance.tex, as its own block. Writes OUT/analysis.json and these LaTeX tabulars (\\input them inside
+a table):
   success.tex     per task and agent: successes / valid runs, success rate, 95 % Wilson score interval
   tests.tex       C3-C6: Barnard's exact test on task success, per simulated task (8 tests, unadjusted), and C7: the
                   sign of each native - OpenCode difference in success rate
   efficiency.tex  median and interquartile range of completion time and tool calls (successful runs, with their
                   number) and of cost (all valid runs; runs with a missing cost are left out and counted)
   distance.tex    distance to goal: median and IQR over the valid runs in which it is defined, with their number
-  rq3.tex         per task and agent: share of runs with a fall, an obstacle and a bumped outcome; rejected and refused
-                  tool calls per run; instruction following; A7's calls to its exempt tools
+  rq3.tex         per task and agent: share of runs with a fall, an obstacle and a bumped outcome and (Search) an
+                  intervention; rejected and refused tool calls per run; instruction following; A7's calls to its
+                  exempt tools
   checks.tex      instruction and image check, right answers out of the attempts, before and after
 Plus, in analysis.json only: valid and invalid runs per agent with the reasons, the end conditions of failed runs,
 and token counts (median and IQR over all valid runs; runs with missing counts left out and counted).
@@ -37,7 +40,9 @@ import metrics  # noqa: E402
 import records  # noqa: E402
 from agent_container import AGENT_IDS, AGENTS  # noqa: E402
 
-TASKS = [("corridor", "Corridor"), ("corridor_complex", "Complex corridor")]
+SIM_TASKS = [("corridor", "Corridor"), ("corridor_complex", "Complex corridor")]  # tested (C3-C6), distance to goal
+SEARCH = [("search", "Search")]  # physical NAO: descriptive only (section 5.1.10)
+TASKS = SIM_TASKS + SEARCH
 GRID = AGENTS["grid"]
 PAIRS = [tuple(p) for p in GRID["pairs"]]  # (native, OpenCode) for C3-C6
 TESTED = {c: tuple(GRID["contrasts"][c]) for c in ("C3", "C4", "C5", "C6")}
@@ -122,6 +127,8 @@ def summary(data):
                     "runs_with_fall": share(lambda r: r["safety_events"]["falls"] > 0),
                     "runs_with_obstacle": share(lambda r: r["safety_events"]["obstacle"] > 0),
                     "runs_with_bumped": share(lambda r: r["safety_events"]["bumped"] > 0),
+                    "runs_with_intervention": share(lambda r: (r["safety_events"]["interventions"] or 0) > 0)
+                    if key in dict(SEARCH) else None,
                     "rejected_per_run": per_run(lambda r: r["tool_calls"]["rejected"]),
                     "refused_per_run": per_run(lambda r: r["tool_calls"]["refused"]),
                     "instruction_following": share(lambda r: r["instruction_following"]),
@@ -138,7 +145,7 @@ def tests(per_task):
     """C3-C6 with Barnard's exact test per simulated task (unadjusted), and C7's signs."""
     out = {"method": "scipy.stats.barnard_exact, two-sided, defaults (pooled Wald statistic, n=32); 8 tests, "
                      "not adjusted for multiple comparisons (section 5.1.10)", "C3-C6": [], "C7": {}}
-    for key, _ in TASKS:
+    for key, _ in SIM_TASKS:
         signs = {}
         for c, (native, opencode) in TESTED.items():
             a, b = per_task[key][native], per_task[key][opencode]
@@ -239,13 +246,15 @@ def latex(result):
     out["distance.tex"] = tabular("lllll", head0 + " & \\textbf{Distance to goal (m)} & \\textbf{Runs}",
                                   [(name, [[label(a), mi(s[k][a]["distance_to_goal_m"], "%.2f"),
                                             "%d/%d" % (s[k][a]["distance_to_goal_m"]["n"], s[k][a]["n"])]
-                                           for a in AGENT_IDS]) for k, name in TASKS])
+                                           for a in AGENT_IDS]) for k, name in SIM_TASKS])
     pct = lambda v: f(None if v is None else 100 * v, "%.0f\\,\\%%")  # noqa: E731
-    out["rq3.tex"] = tabular("lllcccccccc", head0 + " & \\textbf{Runs} & \\textbf{Fall} & \\textbf{Obstacle} & \\textbf{Bumped} & "
+    out["rq3.tex"] = tabular("lllccccccccc", head0 + " & \\textbf{Runs} & \\textbf{Fall} & \\textbf{Obstacle} & \\textbf{Bumped} & "
+                             "\\textbf{Interv.} & "
                              "\\textbf{Rejected/run} & \\textbf{Refused/run} & \\textbf{Instr.\\ foll.} & \\textbf{Exempt/run}",
                              [(name, [[label(a), str(s[k][a]["n"])]
                                       + [pct(s[k][a]["rq3"][x]) for x in ("runs_with_fall", "runs_with_obstacle",
-                                                                          "runs_with_bumped")]
+                                                                          "runs_with_bumped",
+                                                                          "runs_with_intervention")]
                                       + [f(s[k][a]["rq3"]["rejected_per_run"], "%.1f"),
                                          f(s[k][a]["rq3"]["refused_per_run"], "%.1f"),
                                          pct(s[k][a]["rq3"]["instruction_following"]),
