@@ -14,6 +14,7 @@ one figure, since their results are not compared (section 1.4). Writes to OUT (d
   PREFIXcost.pdf       success rate against median cost per run, one panel per simulated task; the harness pairs joined
   PREFIXtime.pdf       completion time of every successful run, with the median, one panel per simulated task
   PREFIXsuccess-search.pdf, PREFIXcost-search.pdf, PREFIXtime-search.pdf   the same for Search, one panel
+  PREFIXdistance.pdf   distance to goal at rest of every run where it is defined, with d, one panel per simulated task
   PREFIXpaths-TASK.pdf the torso's path on the floor plan, one panel per agent (rows: LLM, columns: native harness,
                        OpenCode); runs without a recorded path show only the pose at rest; for describing failures
   PREFIXtools-TASK.pdf per category (each tool, obstacle outcomes, falls, refused and rejected calls), every
@@ -38,6 +39,7 @@ sys.path.insert(0, str(REPO / "pilot"))
 import analysis  # noqa: E402
 import dashboard  # noqa: E402
 import records  # noqa: E402
+import success  # noqa: E402
 from agent_container import AGENT_IDS, AGENTS  # noqa: E402
 
 SIM_TASKS = analysis.SIM_TASKS
@@ -55,7 +57,7 @@ plt.rcParams.update({
     "ytick.color": INK_2, "xtick.major.width": 0.6, "ytick.major.width": 0.6, "axes.spines.top": False,
     "axes.spines.right": False, "pdf.fonttype": 42, "savefig.bbox": "tight", "savefig.pad_inches": 0.02,
 })
-WIDTH = 6.0  # inches, about the text width of the thesis
+WIDTH = 4.4  # inches: with the labels outside the axes, the figures come out at most the thesis text width (406 pt)
 
 
 def panels(tasks, height):
@@ -77,7 +79,7 @@ def marker(a, colour=INK, size=5):
 
 def harness_legend(fig, extra=(), **kw):
     handles = [Line2D([], [], **marker(PAIRS[0][0])), Line2D([], [], **marker(PAIRS[0][1]))] + [h for h, _ in extra]
-    labels = ["native harness (Claude Code, Antigravity)", "OpenCode"] + [t for _, t in extra]
+    labels = ["native harness", "OpenCode"] + [t for _, t in extra]  # the row labels name the harness
     fig.legend(handles, labels, frameon=False, ncol=len(handles), **kw)
 
 
@@ -114,7 +116,7 @@ def fig_success(result, tasks, path):
         ax.set_xticks([0, 0.25, 0.5, 0.75, 1], ["0", "0.25", "0.5", "0.75", "1"])
         ax.set_title(name, loc="left", fontsize=9, color=INK)
         ax.set_xlabel("Success rate (95 % Wilson interval)")
-    harness_legend(fig, loc="lower center", bbox_to_anchor=(0.55, -0.1))
+    harness_legend(fig, loc="upper center", bbox_to_anchor=(0.55, 0.0))
     fig.subplots_adjust(wspace=0.25)
     fig.savefig(path)
     plt.close(fig)
@@ -190,7 +192,7 @@ def fig_cost(result, tasks, path):
     axes[0].set_ylabel("Success rate")
     fig.legend([Line2D([], [], **marker(PAIRS[0][0])), Line2D([], [], **marker(PAIRS[0][1])),
                 Line2D([], [], color=MUTED, linewidth=1, linestyle=(0, (3, 2)))],
-               ["native harness", "OpenCode", "same LLM (C3: A1, A2; C4: A3, A4; C5: A5, A6; C6: A7, A8)"],
+               ["native harness", "OpenCode", "same LLM"],
                frameon=False, **(dict(loc="upper right", bbox_to_anchor=(1, 1.08), ncol=3) if len(tasks) > 1
                                   else dict(loc="upper center", bbox_to_anchor=(0.5, 0), ncol=1)))
     fig.subplots_adjust(wspace=0.15)
@@ -217,12 +219,42 @@ def fig_time(result, data, tasks, path):
         ax.set_xlim(0, top * 1.08 if top else 1)
         ax.set_title(name, loc="left", fontsize=9, color=INK)
         ax.set_xlabel("Completion time (s), successful runs")
-    harness_legend(fig, [(Line2D([], [], color=ACCENT, linewidth=2), "median")], loc="lower center",
-                   bbox_to_anchor=(0.55, -0.1))
+    harness_legend(fig, [(Line2D([], [], color=ACCENT, linewidth=2), "median")], loc="upper center",
+                   bbox_to_anchor=(0.55, 0.0))
     fig.subplots_adjust(wspace=0.15)
     fig.savefig(path)
     plt.close(fig)
 
+
+def fig_distance(data, tasks, path):
+    """Distance to goal at rest of every valid run in which it is defined, with d; failed runs in the accent colour.
+    Right of each row: the runs that stopped before the corner of the last leg, where it is not defined."""
+    fig, axes = panels(tasks, 2.8)
+    top = max([r["distance_to_goal_m"] for k, _ in tasks for a in AGENT_IDS for r in data.get((k, a), [])
+               if r["distance_to_goal_m"] is not None] + [1.2])
+    for ax, (key, name) in zip(axes, tasks):
+        d = success.area(key)["d"]
+        ax.axvline(d, color=MUTED, linewidth=1, linestyle=(0, (3, 2)), zorder=1)
+        for a in AGENT_IDS:
+            runs = data.get((key, a), [])
+            shown = sorted((r for r in runs if r["distance_to_goal_m"] is not None), key=lambda r: r["distance_to_goal_m"])
+            for j, r in enumerate(shown):
+                ax.plot(r["distance_to_goal_m"], ROW[a] + (j - (len(shown) - 1) / 2) * 0.08, alpha=0.9, zorder=2,
+                        **marker(a, INK if r["task_success"] else ACCENT, size=4))
+            undefined = len(runs) - len(shown)
+            if undefined:
+                ax.text(1.01, ROW[a], "+%d" % undefined, transform=ax.get_yaxis_transform(), va="center", ha="left",
+                        color=INK_2, fontsize=7, clip_on=False)
+        agent_axis(ax, labels=ax is axes[0])
+        ax.set_xlim(0, top * 1.05)
+        ax.set_title(name, loc="left", fontsize=9, color=INK)
+        ax.set_xlabel("Distance to goal at rest (m)")
+    harness_legend(fig, [(Line2D([], [], **marker(PAIRS[0][1], ACCENT, size=4)), "failed run"),
+                         (Line2D([], [], color=MUTED, linewidth=1, linestyle=(0, (3, 2))), "d")],
+                   loc="upper center", bbox_to_anchor=(0.45, 0.0))
+    fig.subplots_adjust(wspace=0.2)
+    fig.savefig(path)
+    plt.close(fig)
 
 TOOLS = ["get_state", "look", "look_around", "stand", "walk_to", "go", "say", "rest"]
 CATEGORIES = [(t, t, lambda r, t=t: r["tool_calls"]["by_tool"].get(t, 0)) for t in TOOLS] + [
@@ -334,6 +366,7 @@ def main():
         fig_success(result, tasks, p("success%s.pdf" % suffix))
         fig_cost(result, tasks, p("cost%s.pdf" % suffix))
         fig_time(result, data, tasks, p("time%s.pdf" % suffix))
+    fig_distance(data, SIM_TASKS, p("distance.pdf"))  # simulated tasks only: Search has no ground truth
     for key, _ in SIM_TASKS:  # Search has no recorded path
         fig_paths(result, data, key, p("paths-%s.pdf" % key.replace("_", "-")))
     for key, _ in SIM_TASKS + SEARCH:

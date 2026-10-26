@@ -20,7 +20,9 @@ Per run:
   * safety_events: falls, and obstacle and bumped outcomes, in the same window as tool_calls. Interventions apply
     to Search only. Search falls: the operator's count when given (operator_notes.json falls_observed; NAOqi reported
     a fall the operator did not see, 2026-10-19), else NAOqi's fall events; falls_reported_by_naoqi keeps the latter.
-  * instruction_following: whether the first two tool calls are get_state and then stand.
+  * instruction_following: whether the first two tool calls are get_state and then stand, in the order in which the
+    LLM made them, also within one turn (llm_call_order, from the transcript); the bridge's arrival order only when
+    the transcript has no NAO calls (instruction_order_source says which).
   * distance_to_goal_m (an addition beyond Table 5.4, approved 2026-10-06): the torso's distance to the goal surface
     at the moment rest arrived, from the same ground truth; None if the run did not end with rest or the torso was
     not in the last leg or the corner before it (pilot/success.py, distance_to_goal).
@@ -171,6 +173,34 @@ def harness_rejected(harness, agent_dir):
     return rejected
 
 
+def llm_call_order(harness, agent_dir):
+    """The NAO tools in the order in which the LLM made the calls, also within one turn (section 4.4, instruction
+    following; author 2026-10-15), without the MCP prefix. The bridge's arrival order can differ: a harness may send
+    the calls of one turn at once. OpenCode's tool_use events come in the order the calls *finished*, so its calls
+    are ordered by their part IDs, which OpenCode assigns in ascending order as the LLM's output streams in. None when
+    this harness's transcript format is not handled or has no NAO calls."""
+    events = read_jsonl_lenient(agent_dir / "transcript.jsonl")
+    if harness == "claude-code":
+        calls = [block.get("name") for e in events if e.get("type") == "assistant"
+                 for block in (e.get("message") or {}).get("content") or []
+                 if isinstance(block, dict) and block.get("type") == "tool_use"]
+    elif harness == "opencode":
+        parts = {}
+        for e in events:
+            part = e.get("part") or {}
+            if e.get("type") == "tool_use" and part.get("type") == "tool":
+                parts[part.get("partID") or part.get("id")] = part.get("tool")
+        calls = [parts[k] for k in sorted(parts)]
+    elif harness == "agy":
+        calls = [c.get("name") for path in sorted(agent_dir.glob("agy-brain/*/.system_generated/logs/transcript_full.jsonl"))
+                 for e in read_jsonl_lenient(path) if e.get("type") == "PLANNER_RESPONSE"
+                 for c in e.get("tool_calls") or []]
+    else:
+        return None
+    prefix = {"opencode": "naoqi_", "claude-code": "mcp__naoqi__", "agy": "mcp_naoqi_"}[harness]
+    return [tool[len(prefix):] for tool in calls if (tool or "").startswith(prefix)] or None
+
+
 def read_jsonl_lenient(path):
     records = []
     for line in path.read_text(errors="replace").splitlines() if path.exists() else []:
@@ -294,6 +324,7 @@ def metrics(run_dir):
     cost, cost_source = harness_cost(manifest["agent_config"]["harness"], run_dir / "agent", manifest.get("price"))
     tokens, tokens_source = harness_tokens(manifest["agent_config"]["harness"], run_dir / "agent")
     at_harness = harness_rejected(manifest["agent_config"]["harness"], run_dir / "agent")
+    order = llm_call_order(manifest["agent_config"]["harness"], run_dir / "agent")
     return {
         "run_id": manifest["run_id"], "agent": manifest["agent"], "task": manifest["task"],
         "task_key": manifest["task_key"], "phase": manifest.get("phase"),
@@ -326,6 +357,9 @@ def metrics(run_dir):
             "rejected": sum(c["outcome"] == "rejected" for c in calls) + (at_harness or 0),
             "rejected_by_harness": at_harness,  # None: not handled for this harness yet
             "refused": sum(c["outcome"] == "refused" for c in calls),
+            # walks whose distance or turn the bridge clamped to the tool registry's limit (the result's "clamped")
+            "clamped_walks": sum(c["outcome"] == "ok" and c["tool"] in ("walk_to", "go")
+                                 and bool((c.get("result") or {}).get("clamped")) for c in calls),
             # calls that reached the bridge, per tool (harness-rejected calls are only in rejected_by_harness)
             "by_tool": {t: sum(c["tool"] == t for c in calls) for t in sorted({c["tool"] for c in calls})},
         },
@@ -339,7 +373,9 @@ def metrics(run_dir):
             "bumped": outcomes.count("bumped"),
             "interventions": len(notes.get("interventions") or []) if search else None,  # Search only
         },
-        "instruction_following": [c["tool"] for c in calls[:2]] == ["get_state", "stand"],
+        # the LLM's own order (llm_call_order); the bridge's arrival order only when the transcript has none
+        "instruction_following": (order or [c["tool"] for c in calls])[:2] == ["get_state", "stand"],
+        "instruction_order_source": "transcript" if order else "bridge",
         "real_time_factor": rtf,
     }
 

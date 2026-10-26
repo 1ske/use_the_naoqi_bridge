@@ -15,12 +15,14 @@ a table):
   tests.tex       C3-C6: Barnard's exact test on task success, per simulated task (8 tests, unadjusted), and C7: the
                   sign of each native - OpenCode difference in success rate
   efficiency.tex  median and interquartile range of completion time and tool calls (successful runs, with their
-                  number) and of cost (all valid runs; runs with a missing cost are left out and counted)
+                  number) and of cost (all valid runs; runs with a missing cost are left out and counted); the
+                  simulated tasks only, Search in efficiency-search.tex (chapter 5 reports Search on its own)
   distance.tex    distance to goal: median and IQR over the valid runs in which it is defined, with their number
   rq3.tex         per task and agent: share of runs with a fall, an obstacle and a bumped outcome and (Search) an
-                  intervention; rejected and refused tool calls per run; instruction following; A7's calls to its
-                  exempt tools
+                  intervention; rejected and refused tool calls and clamped walks per run; instruction following;
+                  A7's calls to its exempt tools
   checks.tex      instruction and image check, right answers out of the attempts, before and after
+  runs.tex        per agent: valid (invalid) runs per task, and the instruction and image checks before / after
 Plus, in analysis.json only: valid and invalid runs per agent with the reasons, the end conditions of failed runs,
 and token counts (median and IQR over all valid runs; runs with missing counts left out and counted).
 
@@ -131,6 +133,7 @@ def summary(data):
                     if key in dict(SEARCH) else None,
                     "rejected_per_run": per_run(lambda r: r["tool_calls"]["rejected"]),
                     "refused_per_run": per_run(lambda r: r["tool_calls"]["refused"]),
+                    "clamped_walks_per_run": per_run(lambda r: r["tool_calls"]["clamped_walks"]),
                     "instruction_following": share(lambda r: r["instruction_following"]),
                     "exempt_calls": dict(sum((Counter(r.get("exempt_calls") or {}) for r in runs), Counter())),
                     "exempt_calls_per_run": per_run(lambda r: sum((r.get("exempt_calls") or {}).values())),
@@ -174,15 +177,18 @@ def checks():
 def validity(runs):
     out = {}
     for manifest, m in runs:
-        a = out.setdefault(manifest["agent"], {"valid": Counter(), "invalid": 0, "excluded": 0, "reasons": Counter()})
+        a = out.setdefault(manifest["agent"], {"valid": Counter(), "invalid": 0, "invalid_by_task": Counter(),
+                                               "excluded": 0, "reasons": Counter()})
         if m["excluded"]:
             a["excluded"] += 1
         elif m["valid"]:
             a["valid"][manifest["task_key"]] += 1
         else:
             a["invalid"] += 1
+            a["invalid_by_task"][manifest["task_key"]] += 1
             a["reasons"].update(m["invalid_reasons"])
-    return {a: {"valid": dict(v["valid"]), "invalid": v["invalid"], "excluded": v["excluded"],
+    return {a: {"valid": dict(v["valid"]), "invalid": v["invalid"], "invalid_by_task": dict(v["invalid_by_task"]),
+                "excluded": v["excluded"],
                 "invalid_reasons": dict(v["reasons"])} for a, v in sorted(out.items())}
 
 
@@ -235,28 +241,29 @@ def latex(result):
         "\\textbf{Contrast} & \\textbf{Task} & \\textbf{Agents} & \\textbf{Native} & \\textbf{OpenCode} & "
         "\\textbf{Difference} & \\textbf{$p$} \\\\", "\\midrule"]
         + [" & ".join(r) + " \\\\" for r in rows] + ["\\bottomrule", "\\end{tabular}"]) + "\n"
-    out["efficiency.tex"] = tabular("lllllll", head0 + " & \\textbf{Time (s)} & \\textbf{Tool calls} & \\textbf{Cost (USD)} & "
-                                    "\\textbf{Successful / valid}",
-                                    [(name, [[label(a), mi(s[k][a]["completion_time_s"], "%.0f"),
-                                              mi(s[k][a]["tool_calls"], "%.0f"),
-                                              mi(s[k][a]["cost_usd"], "%.2f")
-                                              + ("\\textsuperscript{*}" if s[k][a]["cost_usd"]["missing"] else ""),
-                                              "%d/%d" % (s[k][a]["k"], s[k][a]["n"])] for a in AGENT_IDS])
-                                     for k, name in TASKS])
+    efficiency = lambda tasks: tabular(  # noqa: E731
+        "lllllll", head0 + " & \\textbf{Time (s)} & \\textbf{Tool calls} & \\textbf{Cost (USD)} & \\textbf{Successes}",
+        [(name, [[label(a), mi(s[k][a]["completion_time_s"], "%.0f"), mi(s[k][a]["tool_calls"], "%.0f"),
+                  mi(s[k][a]["cost_usd"], "%.2f") + ("\\textsuperscript{*}" if s[k][a]["cost_usd"]["missing"] else ""),
+                  "%d/%d" % (s[k][a]["k"], s[k][a]["n"])] for a in AGENT_IDS]) for k, name in tasks])
+    out["efficiency.tex"] = efficiency(SIM_TASKS)
+    out["efficiency-search.tex"] = efficiency(SEARCH)
     out["distance.tex"] = tabular("lllll", head0 + " & \\textbf{Distance to goal (m)} & \\textbf{Runs}",
                                   [(name, [[label(a), mi(s[k][a]["distance_to_goal_m"], "%.2f"),
                                             "%d/%d" % (s[k][a]["distance_to_goal_m"]["n"], s[k][a]["n"])]
                                            for a in AGENT_IDS]) for k, name in SIM_TASKS])
     pct = lambda v: f(None if v is None else 100 * v, "%.0f\\,\\%%")  # noqa: E731
-    out["rq3.tex"] = tabular("lllccccccccc", head0 + " & \\textbf{Runs} & \\textbf{Fall} & \\textbf{Obstacle} & \\textbf{Bumped} & "
+    out["rq3.tex"] = tabular("lllcccccccccc", head0 + " & \\textbf{Runs} & \\textbf{Fall} & \\textbf{Obstacle} & \\textbf{Bumped} & "
                              "\\textbf{Interv.} & "
-                             "\\textbf{Rejected/run} & \\textbf{Refused/run} & \\textbf{Instr.\\ foll.} & \\textbf{Exempt/run}",
+                             "\\textbf{Rejected/run} & \\textbf{Refused/run} & \\textbf{Clamped/run} & \\textbf{Instr.\\ foll.} & "
+                             "\\textbf{Exempt/run}",
                              [(name, [[label(a), str(s[k][a]["n"])]
                                       + [pct(s[k][a]["rq3"][x]) for x in ("runs_with_fall", "runs_with_obstacle",
                                                                           "runs_with_bumped",
                                                                           "runs_with_intervention")]
                                       + [f(s[k][a]["rq3"]["rejected_per_run"], "%.1f"),
                                          f(s[k][a]["rq3"]["refused_per_run"], "%.1f"),
+                                         f(s[k][a]["rq3"]["clamped_walks_per_run"], "%.1f"),
                                          pct(s[k][a]["rq3"]["instruction_following"]),
                                          f(s[k][a]["rq3"]["exempt_calls_per_run"], "%.1f")
                                          if AGENTS["transcript_check"]["exempt"].get(a) else "--"]
@@ -269,6 +276,21 @@ def latex(result):
         "\\begin{tabular}{@{}lllcc@{}}", "\\toprule",
         head0 + " & \\textbf{Instruction check} & \\textbf{Image check} \\\\", "\\midrule"]
         + ["%s & %s & %s \\\\" % (label(a), cell(a, "instructions"), cell(a, "image")) for a in AGENT_IDS]
+        + ["\\bottomrule", "\\end{tabular}"]) + "\n"
+    v = result["validity"]
+    runs_cell = lambda a, k: "%d (%d)" % (v.get(a, {}).get("valid", {}).get(k, 0),  # noqa: E731
+                                          v.get(a, {}).get("invalid_by_task", {}).get(k, 0))
+    out["runs.tex"] = "\n".join([
+        "%% Generated by pilot/analysis.py from the run and check records; do not edit by hand.",
+        "%% Runs: valid (invalid, repeated in place). Checks: right answers out of the attempts, before / after.",
+        "\\begin{tabular}{@{}llllllcc@{}}", "\\toprule",
+        " & & & \\multicolumn{3}{c}{\\textbf{Valid (invalid) runs}} & \\multicolumn{2}{c}{\\textbf{Checks, before / after}} \\\\",
+        "\\cmidrule(lr){4-6} \\cmidrule(l){7-8}",
+        head0 + " & " + " & ".join("\\textbf{%s}" % name for _, name in TASKS)
+        + " & \\textbf{Instructions} & \\textbf{Image} \\\\", "\\midrule"]
+        + [("\\addlinespace[2pt]" if i and i % 2 == 0 else "") + "%s & %s & %s & %s \\\\" % (
+            label(a), " & ".join(runs_cell(a, k) for k, _ in TASKS), cell(a, "instructions"), cell(a, "image"))
+           for i, a in enumerate(AGENT_IDS)]
         + ["\\bottomrule", "\\end{tabular}"]) + "\n"
     return out
 
