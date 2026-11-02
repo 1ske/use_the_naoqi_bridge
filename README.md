@@ -2,7 +2,7 @@
 
 Lets an LLM drive a NAO through NAOqi 2.1.4 over MCP. The LLM plans. The MCP server offers only
 safe movement primitives (walk, turn, stand, rest, state) and the head cameras (as real MCP images),
-and a Python 2.7 bridge enforces the safety rules. The simulator (naoqisim) comes from [NAOQI_ATTEMPT_v1](../NAOQI_ATTEMPT_v1). Everything
+and a Python 2.7 bridge enforces the safety rules. The simulator (naoqisim) comes from [NAOQI_ATTEMPT_v1](https://github.com/1ske/NAOQI_ATTEMPT_v1). Everything
 here talks to NAOqi on port 9559, so the same code runs on a real NAO V5 by changing `NAO_IP`.
 
 ```
