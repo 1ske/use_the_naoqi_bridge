@@ -5,6 +5,10 @@ safe movement primitives (walk, turn, stand, rest, state) and the head cameras (
 and a Python 2.7 bridge enforces the safety rules. The simulator (naoqisim) comes from [NAOQI_ATTEMPT_v1](https://github.com/1ske/NAOQI_ATTEMPT_v1). Everything
 here talks to NAOqi on port 9559, so the same code runs on a real NAO V5 by changing `NAO_IP`.
 
+The run records of the thesis evaluation (`pilot/`: eight agents, three tasks) are in
+[use_the_naoqi_bridge_records](https://github.com/1ske/use_the_naoqi_bridge_records); `pilot/analysis.py`,
+`pilot/posthoc.py` and `pilot/figures.py` regenerate the thesis tables and figures from them.
+
 ```
 LLM (Claude Code) ──MCP stdio──► mcp_server/  Python 3.10+, native on the Mac (uv), no NAOqi code
                                     │ HTTP/JSON, 127.0.0.1:8765  (+ heartbeat every 5 s)
